@@ -1,3 +1,7 @@
+"""
+核心代码 全景图的生成
+"""
+
 from transformers import CLIPTextModel, CLIPTokenizer, logging
 from diffusers import AutoencoderKL, UNet2DConditionModel, DDIMScheduler
 

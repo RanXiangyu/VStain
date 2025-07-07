@@ -1,5 +1,6 @@
 """
 Adapted from https://huggingface.co/spaces/stabilityai/stable-diffusion
+APP界面实现
 """
 
 import torch

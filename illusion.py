@@ -1,3 +1,8 @@
+"""
+Illusion Diffusion
+
+"""
+
 import torch
 from PIL import Image
 from diffusers import (

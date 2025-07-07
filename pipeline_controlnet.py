@@ -12,6 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""
+基于ControlNet模型的图像生成流程
+"""
+
+
 
 import inspect
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
