@@ -1,0 +1,36 @@
+2025.3.15
+1. 配置环境StyleID
+2. 配置sd1.4
+    下载checkpoint
+    huggingface-cli download CompVis/stable-diffusion-v-1-4-original sd-v1-4.ckpt --resume-download --local-dir /data2/ranxiangyu/checkpoints
+    连接checkpoint和代码的位置
+    ln -s /data2/ranxiangyu/checkpoints/sd-v1-4.ckpt /home/ranxiangyu/StyleID/models/ldm/stable-diffusion-v1/model.ckpt
+    检查连接
+    ls -l models/ldm/stable-diffusion-v1/model.ckpt
+
+2025.3.16
+1. 复制风格图像和测试图像 都变为800张，以匹配模型 ldm/util.py
+    python util/copy_inputs.py --cnt data/cnt --sty data/sty
+2. 尝试运行 
+    python run_styleid.py --cnt data/cnt --sty data/sty --gamma 0.75 --T 1.5
+3. 报错 一系列环境问题
+    taming-transformer
+        git clone https://github.com/CompVis/taming-transformers.git
+        cd taming-transformers
+        pip install -e .
+    pip install -e git+https://github.com/openai/CLIP.git@main#egg=clip
+
+    OSError: Can't load tokenizer for 'openai/clip-vit-large-patch14'
+        1. hugginface无法连接 设置镜像源尝试
+        export HF_ENDPOINT=https://hf-mirror.com
+        python -c "from transformers import CLIPTokenizer; CLIPTokenizer.from_pretrained('openai/clip-vit-large-patch14')"
+        设置镜像源尝试，成功运行！
+        
+2025.3.17
+1. 运行evaluation代码
+    需要下载huggingface上的artfid的计算pth文件，不能下载问题
+    手动下载文件后上传
+        ln -s /home/ranxiangyu/models/checkpoints/art_inception.pth /tmp/art_fid/art_inception.pth
+        检查 ls -lh /tmp/art_fid/art_inception.pth
+    不能直接采用连接的方式
+    修改了evaluation当中的代码，直接嫁给你计算文件指向data2对应的文件夹
