@@ -143,6 +143,7 @@ def main(opt):
     model = load_model_from_config(model_config, f"{opt.ckpt}") #从配置点checkpoint文件和配置文件加载模型 ldm/models/ldm/stable-diffusion-v1/model.ckpt
 
     # 设置设备和采样器
+    # 通过 argparse 解析， 用于指定在哪些 U-Net block 中提取自注意力层的特征，并不需要在所有层数当中提取QKV
     self_attn_output_block_indices = list(map(int, opt.attn_layer.split(',')))
     ddim_inversion_steps = opt.ddim_inv_steps
     save_feature_timesteps = ddim_steps = opt.save_feat_steps
@@ -150,11 +151,15 @@ def main(opt):
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu") # 判断是否有cuda
     model = model.to(device)
     unet_model = model.model.diffusion_model
-    sampler = DDIMSampler(model) # 初始化DDIM采样器
+    sampler = DDIMSampler(model) # 初始化DDIM采样器 DDIM继承自model 作为DDPM/ldm的一个推广
     sampler.make_schedule(ddim_num_steps=ddim_steps, ddim_eta=opt.ddim_eta, verbose=False)  # 设置采样器的步长和eta
-    time_range = np.flip(sampler.ddim_timesteps) # 获取时间步长的反转顺序
-    # 建立时间步长和索引之间的映射
-    idx_time_dict = {}
+    time_range = np.flip(sampler.ddim_timesteps) # 获取时间步长的反转顺序 make_ddim_timesteps()，有uniform/quad两种采样方式，返回序列[1-n]的时间步骤，此处还进行了一个反转，反转为[n~1]
+    """
+    建立时间步长和索引之间的映射
+    idx time_dict = {981: 0, 961: 1, ... 1: 50} 1-50索引 1-1000timestep
+    time_idx_dict = {0: 981, 1: 961, ... 49: 21, 50: 1}
+    """
+    idx_time_dict = {} # 把当前时间步timestep映射到feat map中的索引位置
     time_idx_dict = {}
     for i, t in enumerate(time_range):
         idx_time_dict[t] = i
@@ -171,15 +176,28 @@ def main(opt):
 
     # 定义回掉函数 
     # 在采用过程调用保存特征图
-    def ddim_sampler_callback(pred_x0, xt, i):
-        save_feature_maps_callback(i)
-        save_feature_map(xt, 'z_enc', i)
+    """
+    ddim_sampler_callback
+    ├── save_feature_maps_callback
+    │   └── save_feature_maps（提取 output_blocks 中的注意力 QKV）
+    │       └── save_feature_map（逐个保存 Q/K/V）
+    └── save_feature_map（保存 xt）
 
-    # 保存特定块的特征图
+    blocks = unet_model.input_blocks  # 编码器阶段  提取局部特征
+    blocks = unet_model.middle_block  # 瓶颈  全局语义特征
+    blocks = unet_model.output_blocks # 解码器阶段  控制重建细节
+    """
+    def ddim_sampler_callback(pred_x0, xt, i):
+        save_feature_maps_callback(i) # [B, num_heads, N, head_dim]
+        save_feature_map(xt, 'z_enc', i) # [B, C, H, W]（latent）保存图像本身在潜空间的内容，可以可视化图像的演化过程
+
+    # 保存当前时间步
     def save_feature_maps(blocks, i, feature_type="input_block"):
         block_idx = 0
+        # stable diffusion的上采样 output_blocks有12个，在命令行输入的时候确定了再那几个图层进行保存qkv
         for block_idx, block in enumerate(blocks):
             if len(block) > 1 and "SpatialTransformer" in str(type(block[1])):
+                # 包含多个子模块 并且是spatial transformer 通常在block[1]中
                 if block_idx in self_attn_output_block_indices:
                     # self-attn
                     q = block[1].transformer_blocks[0].attn1.q
@@ -188,13 +206,13 @@ def main(opt):
                     save_feature_map(q, f"{feature_type}_{block_idx}_self_attn_q", i)
                     save_feature_map(k, f"{feature_type}_{block_idx}_self_attn_k", i)
                     save_feature_map(v, f"{feature_type}_{block_idx}_self_attn_v", i)
-            block_idx += 1
+            block_idx += 1 # 多余的添加，并不会对block_idx产生影响，block_idx会被enumerate覆盖
 
-    # 保存输出块的特征图
+    # 保存输出块的特征图 主要是为了简化调用save_feature_maps
     def save_feature_maps_callback(i):
         save_feature_maps(unet_model.output_blocks , i, "output_block")
 
-    # 保存单个特征图
+    # 保存单个时间步的 q//k/v 特征图
     def save_feature_map(feature_map, filename, time):
         global feat_maps
         cur_idx = idx_time_dict[time]
@@ -227,7 +245,7 @@ def main(opt):
                 sty_feat = pickle.load(h)
                 sty_z_enc = torch.clone(sty_feat[0]['z_enc'])
         else:
-            init_sty = model.get_first_stage_encoding(model.encode_first_stage(init_sty))
+            init_sty = model.get_first_stage_encoding(model.encode_first_stage(init_sty)) # 第一步vae 获得图片的潜空间表示z_T
             sty_z_enc, _ = sampler.encode_ddim(init_sty.clone(), num_steps=ddim_inversion_steps, unconditional_conditioning=uc, \
                                                 end_step=time_idx_dict[ddim_inversion_steps-1-start_step], \
                                                 callback_ddim_timesteps=save_feature_timesteps,

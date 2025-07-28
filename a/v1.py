@@ -114,30 +114,6 @@ def load_model_from_config(config_path, ckpt_path, device="cuda", verbose=False)
     model.eval()
     return model
 
-# 保存特定块的特征图
-def save_feature_maps(blocks, i, feature_type="input_block"):
-    block_idx = 0
-    for block_idx, block in enumerate(blocks):
-        if len(block) > 1 and "SpatialTransformer" in str(type(block[1])):
-            if block_idx in self_attn_output_block_indices:
-                # self-attn
-                q = block[1].transformer_blocks[0].attn1.q
-                k = block[1].transformer_blocks[0].attn1.k
-                v = block[1].transformer_blocks[0].attn1.v
-                save_feature_map(q, f"{feature_type}_{block_idx}_self_attn_q", i)
-                save_feature_map(k, f"{feature_type}_{block_idx}_self_attn_k", i)
-                save_feature_map(v, f"{feature_type}_{block_idx}_self_attn_v", i)
-        block_idx += 1
-
-# 保存输出块的特征图
-def save_feature_maps_callback(i):
-    save_feature_maps(unet_model.output_blocks , i, "output_block")
-
-# 保存单个特征图
-def save_feature_map(feature_map, filename, time):
-    global feat_maps
-    cur_idx = idx_time_dict[time]
-    feat_maps[cur_idx][f"{filename}"] = feature_map
 
 def get_opt():
     parser = argparse.ArgumentParser()
@@ -153,6 +129,12 @@ def get_opt():
     parser.add_argument('--ckpt', type=str, help='Path to the model checkpoint')
     parser.add_argument('--T', type=float, default=1.5, help='attention temperature scaling hyperparameter')
     parser.add_argument('--gamma', type=float, default=0.75, help='query preservation hyperparameter')
+    parser.add_argument('--ddim_inv_steps', type=int, default=50, help='DDIM eta')
+    parser.add_argument('--save_feat_steps', type=int, default=50, help='DDIM eta')
+    parser.add_argument('--start_step', type=int, default=49, help='DDIM eta')
+    parser.add_argument('--ddim_eta', type=float, default=0.0, help='DDIM eta')
+
+
 
 def main():
     opt = get_opt()
@@ -174,8 +156,14 @@ def main():
 
     model = load_model_from_config(config_path=opt.model_config, ckpt_path=opt.ckpt, device='cuda')
     vae = model.first_stage_model
-    une = model.model.diffusion_model
+    unet = model.model.diffusion_model
     text_encoder = model.cond_stage_model
+
+    # ddimsampler准备
+    sampler = DDIMSampler(model)
+    sampler.make_schedule(ddim_num_steps=ddim_steps, ddim_eta=opt.ddim_eta, verbose=False)
+    # 获取反转时间步
+
 
     h5_files = get_sorted_h5_files(opt.out)
     wsi_files = get_sorted_wsi_files(opt.wsi)
@@ -197,6 +185,7 @@ def main():
             region = region.convert('RGB')
 
             # 进行处理
+
 
 
 
