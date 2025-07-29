@@ -224,7 +224,7 @@ def main(opt):
     # 一般情况下，第50步的采样是最接近原始图像的
     # start——step控制起始步数
     precision_scope = autocast if opt.precision=="autocast" else nullcontext # 根据命令行参数设置精度
-    uc = model.get_learned_conditioning([""])   # 获取模型的无条件学习条件
+    uc = model.get_learned_conditioning([""])   # 获取模型的无条件学习条件，也就是输入文本
     shape = [opt.C, opt.H // opt.f, opt.W // opt.f] # 设置形状 default=[4, 64, 64]
     sty_img_list = sorted(os.listdir(opt.sty))  # 获取风格图片列表 
     cnt_img_list = sorted(os.listdir(opt.cnt)) # 获取内容图片列表
@@ -245,13 +245,19 @@ def main(opt):
                 sty_feat = pickle.load(h)
                 sty_z_enc = torch.clone(sty_feat[0]['z_enc'])
         else:
-            init_sty = model.get_first_stage_encoding(model.encode_first_stage(init_sty)) # 第一步vae 获得图片的潜空间表示z_T
+            init_sty = model.get_first_stage_encoding(model.encode_first_stage(init_sty)) # 第一步vae 获得图片的潜空间表示z_0 输出[B, C, H//8, W//8]，latent空间下的图像表示
             sty_z_enc, _ = sampler.encode_ddim(init_sty.clone(), num_steps=ddim_inversion_steps, unconditional_conditioning=uc, \
                                                 end_step=time_idx_dict[ddim_inversion_steps-1-start_step], \
                                                 callback_ddim_timesteps=save_feature_timesteps,
                                                 img_callback=ddim_sampler_callback)
-            sty_feat = copy.deepcopy(feat_maps)
-            sty_z_enc = feat_maps[0]['z_enc']
+            """
+            # 对init_sty（也就是latent x0）进行DDIM反演采样，推向z_T
+            # 每当时间步是 callback_ddim_timesteps 中的值，就将当前特征加入feat_maps
+            # encode_ddim(输入图像latent x0， 采样步骤，conditioning条件编码比如文本， unconditional_conditioning无条件编码，CFG scale, end_step结束步长，callback_ddim_timesteps指定在某些t调用回调——为了触发img_callback，img_callback图像回调函数)
+            # 返回sty_z_enc是采样最后一步的x_T，即DDIM反向的起点 和feat_maps
+            """
+            sty_feat = copy.deepcopy(feat_maps) # 保存callback特征信息
+            sty_z_enc = feat_maps[0]['z_enc'] # 提取第一个 step 时的 latent 编码，通常是最后一个 DDIM 时间步（最噪声的 z_T） ｜｜ 提取 z_enc 作为该风格图像的最终 latent 表示 ｜｜确保能够重构出图片
 
         # 遍历内容图片
         for cnt_name in cnt_img_list:
@@ -307,7 +313,7 @@ def main(opt):
                                                         start_step=start_step,
                                                         )
                         # 解码生成图像
-                        x_samples_ddim = model.decode_first_stage(samples_ddim)
+                        x_samples_ddim = model.decode_first_stage(samples_ddim) #  latent 空间的图像 [B, 4, H, W] 解码成 RGB 图像 [B, 3, H*8, W*8]
                         x_samples_ddim = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
                         x_samples_ddim = x_samples_ddim.cpu().permute(0, 2, 3, 1).numpy()
                         x_image_torch = torch.from_numpy(x_samples_ddim).permute(0, 3, 1, 2)
