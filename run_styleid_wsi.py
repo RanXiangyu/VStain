@@ -314,11 +314,15 @@ def main(opt):
                                                         )
                         # 解码生成图像
                         x_samples_ddim = model.decode_first_stage(samples_ddim) #  latent 空间的图像 [B, 4, H, W] 解码成 RGB 图像 [B, 3, H*8, W*8]
-                        x_samples_ddim = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
-                        x_samples_ddim = x_samples_ddim.cpu().permute(0, 2, 3, 1).numpy()
-                        x_image_torch = torch.from_numpy(x_samples_ddim).permute(0, 3, 1, 2)
+                        x_samples_ddim = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0) # 解码后的图像像素值在 [-1, 1] 之间，这一步把它缩放到 [0, 1] 区间（即正常图像的浮点数表示），并截断异常值
+                        x_samples_ddim = x_samples_ddim.cpu().permute(0, 2, 3, 1).numpy() # 将张量移到 CPU，并把通道维从 [B, 3, H, W] → [B, H, W, 3]，并转换为numpy数组，方便后续PIL保存
+                        x_image_torch = torch.from_numpy(x_samples_ddim).permute(0, 3, 1, 2) # 又重新转换成 [B, 3, H, W] 的 PyTorch tensor
                         x_sample = 255. * rearrange(x_image_torch[0].cpu().numpy(), 'c h w -> h w c')
                         img = Image.fromarray(x_sample.astype(np.uint8))
+                        """
+                        手动 clamp + permute + numpy 更加复杂更加细粒度控制
+                    
+                        """
                         # 保存特征图    
                         img.save(os.path.join(output_path, output_name))
                         if len(feat_path_root) > 0:
