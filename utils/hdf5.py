@@ -44,7 +44,7 @@ def get_sorted_wsi_files(wsi_dir):
 
     # 遍历 patches 目录中的文件（不递归）
     for file in os.listdir(wsi_dir):
-        if file.endswith('.svs ') or file.endswith('.tif') or file.endswith('.tiff'):
+        if file.endswith('.svs') or file.endswith('.tif') or file.endswith('.tiff'):
             wsi_path = os.path.join(patches_dir, file)
             wsi_files.append(wsi_path)
 
