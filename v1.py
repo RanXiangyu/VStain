@@ -71,6 +71,7 @@ def get_opt():
     parser.add_argument('--save_feat_steps', type=int, default=50, help='DDIM eta')
     parser.add_argument('--start_step', type=int, default=49, help='DDIM eta')
     parser.add_argument('--ddim_eta', type=float, default=0.0, help='DDIM eta')
+    parser.add_argument('--C_latent', type=int, default=4, help='latent channels')
     # 代码运行设置
     parser.add_argument('--gpu', type=int, default=0, help='GPU ID to use')
     # 模块设置
@@ -82,47 +83,83 @@ def get_opt():
     return opt
 
 
-def load_img(path):
+# 预处理图片 剪裁 归一化，调整通道
+def preprocess_img(path):
     image = Image.open(path).convert('RGB')
     x, y = image.size
     print(f"Loaded input image of size ({x}, {y}) from {path}")
     h = w = 512
-    image = transforms.CenterCrop(min(x,y))(image)
+    image = transforms.CenterCrop(min(x,y))(image) # (x, y)
     image = image.resize((w, h), resample=Image.Resampling.LANCZOS)
-    image = np.array(image).astype(np.float32) / 255.0 # 将图像转换为numpy数组并归一化到[0, 1]范围
+    image = np.array(image).astype(np.float32) / 255.0 # 将图像转换为numpy数组并归一化到[0, 1]范围 (512, 512, 3)
     image = image[None].transpose(0, 3, 1, 2) # 添加批次维度并调整通道顺序,形状从 [H, W, 3] 变为 [1, H, W, 3]
-    image = torch.from_numpy(image) # 转换为PyTorch张量并调整像素范围
+    image = torch.from_numpy(image) # 转换为PyTorch张量并调整像素范围  (1, 3, 512, 512)
     return 2.*image - 1.
 
-def feature_extractor(img_dir, img_name, feature_dir, model, sampler, ddim_inversion_steps, uc, time_idx_dict, start_step, save_feature_timesteps, ddim_sampler_callback, save_feat=False):
+def preprocess_region(region: Image.Image):
+    image = region  # 已经是 PIL.Image.convert("RGB")
+    image = np.array(image).astype(np.float32) / 255.0
+    image = image[None].transpose(0, 3, 1, 2)  # [1, 3, H, W]
+    image = torch.from_numpy(image)
+    return 2. * image - 1.  # 映射到 [-1, 1]
+
+# 特征提取 在特定的时间步 save_feature_timesteps
+def feature_extractorde(
+    img_dir, 
+    img_name, 
+    feature_dir, 
+    model, 
+    sampler, 
+    ddim_inversion_steps, 
+    uc, 
+    time_idx_dict, 
+    start_step, 
+    save_feature_timesteps
+    p_save_feature_timestep=None,    # 👈 指定单个时间步（如30），默认为None不提取
+    return_z_enc=True,        # 👈 是否返回img_z_enc
+    ddim_sampler_callback=None,
+    save_feat=False
+    ):
     global feat_maps
+    feat_maps = []
 
     img_feature = None
     img_z_enc = None
+    feature = None # 指定时间步的特征
 
     img_path = os.path.join(img_dir, img_name)
-    init_img = load_img(img_path).to('cuda')
+    init_img = preprocess_img(img_path).to('cuda')
     img_feat_name = os.path.join(feature_dir, os.path.basename(img_name).split('.')[0] + '_sty.pkl')
 
-    if len(feature_dir) > 0 and os.path.exists(img_feat_name):
-        print(f"Loading style feature from {img_feat_name}")
+    if feature_timestep is not None:
+        save_feature_timesteps = [feature_timestep]
+    else:
+        save_feature_timesteps = []
+
+    # 1. 直接加载特征返回 style图片
+    if os.path.exists(img_feat_name):
+        print(f"[✓] Loading style feature from {img_feat_name}")
         with open(img_feat_name, 'rb') as f:
             img_feature = pickle.load(f)
             img_z_enc = torch.clone(img_feature[0]['z_enc'])
-    else:
-        init_img = model.get_first_stage_encoding(model.encode_first_stage(init_img))  # [1, 4, 64, 64] z_0
-        img_z_enc, _ = sampler.encode_ddim(init_img.clone(), num_steps = ddim_inversion_steps, \
+        return img_feature, z_enc_startstep
+
+    
+    init_img = model.get_first_stage_encoding(model.encode_first_stage(init_img))  # [1, 4, 64, 64] z_0
+    img_z_enc, _ = sampler.encode_ddim(init_img.clone(), num_steps = ddim_inversion_steps, \ 
                                         unconditional_conditioning = uc, \
                                         end_step = time_idx_dict[ddim_inversion_steps - 1 - start_step], \
                                         callback_ddim_timesteps = save_feature_timesteps, \
                                         img_callback = ddim_sampler_callback)
-        img_feature = copy.deepcopy(feat_maps)
-        img_z_enc = feat_maps[0]['z_enc']
-        
-        if save_feat and len(feature_dir) > 0:
-                print(f"Saving style feature to {img_feat_name}")
-                with open(img_feat_name, 'wb') as f:
-                    pickle.dump(img_feature, f)
+    img_feature = copy.deepcopy(feat_maps)
+    # img_z_enc = feat_maps[0]['z_enc']
+    img_z_enc = img_feature[0]['z_enc']
+
+
+    if save_feat and len(feature_dir) > 0:
+        print(f"Saving style feature to {img_feat_name}")
+        with open(img_feat_name, 'wb') as f:
+            pickle.dump(img_feature, f)
 
     return img_feature, img_z_enc
 
@@ -171,11 +208,11 @@ def main():
         在采样过程中，DDIM 实际是从 t+1 到 t 反推图像，所以需要将时间步整体右移 1
         ddim_timesteps = [0+1, 16+1, ..., 784+1] 是正序的
     在sample的过程中实际上是调用 ddim.py中的ddim_sampling() 函数，该函数中进行以下循环：
+        timesteps = self.ddpm_num_timesteps if ddim_use_original_steps else self.ddim_timesteps
         time_range = reversed(range(0,timesteps)) if ddim_use_original_steps else np.flip(timesteps)
         iterator = tqdm(time_range, desc='DDIM Sampler', total=total_steps) # 进度条包装
         for i, step in enumerate(iterator):
-
-    
+    —— 所以在主程序的逻辑循环中，应该是reverse的sampler.ddim_timestep，也就是time_range
     """
     idx_time_dict = {} # 去噪时间步：ddim顺序索引
     time_idx_dict = {} # ddim索引：去噪时间步
@@ -219,19 +256,33 @@ def main():
         W, H = slide.dimensions
 
         # 创建全景图需要的张量
-        latent = torch.randn((1, self.unet.in_channels, H // 8, W // 8), device=self.device)
+        latent = torch.randn((1, opt.C_latent, H // 8, W // 8), device=self.device)
         count = torch.zeros_like(latent)
         value = torch.zeros_like(latent)
+
+        patch_size = opt.patch_size
+        patch_size_latent = opt.patch_size // 8 # 在潜空间当中需要缩放8倍
         
-        for step_idx = 
+        iterator = tqdm(time_range, desc='DDIM Sampler', total=total_steps)
 
-        for coord in coords_list:
-            x, y = coord
+        for i,  step in enumerate(iterator):
+            count.zero_()
+            value.zero_()
 
-            region = slide.read_region((x, y), 0, (x + opt.patch_size, y + opt.patch_size))
-            region = region.convert('RGB')
+            for coord in coords_list:
+                x_pixel, y_pixel = coord # 在潜空间当中需要缩放8倍
+                x_latent = x_pixel // 8
+                y_latent = y_pixel // 8
 
-            # 进行处理
+                # region预处理
+                region = slide.read_region((x_pixel, y_pixel), 0, (patch_size, patch_size)).convert("RGB")
+                region_tensor = preprocess_region(region)
+
+                # 特征提取
+
+                latent_patch = latent[:, :, y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent]
+
+                # 进行处理
 
 
 

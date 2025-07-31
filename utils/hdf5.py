@@ -57,7 +57,7 @@ def get_sorted_wsi_files(wsi_dir):
 
 def read_h5_coords(h5_path):
     """
-    读取H5文件中的坐标信息
+    读取H5文件中的坐标信息列表
     Args:
         h5_path (str): H5文件路径
     Returns:

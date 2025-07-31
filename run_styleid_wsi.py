@@ -233,7 +233,7 @@ def main(opt):
     # 遍历风格图片
     for sty_name in sty_img_list:
         sty_name_ = os.path.join(opt.sty, sty_name)
-        init_sty = load_img(sty_name_).to(device)
+        init_sty = load_img(sty_name_).to(device)  #
         seed = -1
         sty_feat_name = os.path.join(feat_path_root, os.path.basename(sty_name).split('.')[0] + '_sty.pkl')
         sty_z_enc = None
@@ -301,7 +301,7 @@ def main(opt):
                         if opt.without_attn_injection:
                             feat_maps = None
 
-                        # inference
+                        # inference shsape = [opt.C, opt.H // opt.f, opt.W // opt.f]  形状 default=[4, 64, 64]
                         samples_ddim, intermediates = sampler.sample(S=ddim_steps,
                                                         batch_size=1,
                                                         shape=shape,
@@ -343,3 +343,5 @@ def main(opt):
 if __name__ == "__main__":
     opt = get_opt()
     main(opt)
+
+
