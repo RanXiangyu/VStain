@@ -162,10 +162,21 @@ def main():
 
     # ddimsampler准备
     sampler = DDIMSampler(model)
-    sampler.make_schedule(ddim_num_steps=ddim_steps, ddim_eta=opt.ddim_eta, verbose=False)
+    sampler.make_schedule(ddim_num_steps=ddim_steps, ddim_eta=opt.ddim_eta, verbose=False) # ddim_steps就是循环采样的步数
 
     # 获取ddim的时间步和索引映射 并反转 
     time_range = np.flip(sampler.ddim_timesteps)
+    """
+    ddim_timesteps 在ddim.py中由 make_ddim_timesteps() 生成
+        在采样过程中，DDIM 实际是从 t+1 到 t 反推图像，所以需要将时间步整体右移 1
+        ddim_timesteps = [0+1, 16+1, ..., 784+1] 是正序的
+    在sample的过程中实际上是调用 ddim.py中的ddim_sampling() 函数，该函数中进行以下循环：
+        time_range = reversed(range(0,timesteps)) if ddim_use_original_steps else np.flip(timesteps)
+        iterator = tqdm(time_range, desc='DDIM Sampler', total=total_steps) # 进度条包装
+        for i, step in enumerate(iterator):
+
+    
+    """
     idx_time_dict = {} # 去噪时间步：ddim顺序索引
     time_idx_dict = {} # ddim索引：去噪时间步
     for i, t in enumerate(time_range):
@@ -200,8 +211,9 @@ def main():
         sty_feature, sty_z_enc = feature_extractor(opt.sty, sty_img, feature_dir, model, sampler, ddim_inversion_steps, uc, time_idx_dict, opt.start_step, save_feature_timesteps, ddim_sampler_callback, save_feat=True)
 
 
-
+    # 遍历所有h5文件
     for idx, h5_file in tqdm(enumerate(h5_files), total=len(h5_files), desc="Processing H5 files"):
+        # 读取坐标列表 打开slide
         coords_list = read_h5_coords(h5_files[idx])
         slide = openslide.OpenSlide(wsi_files[idx])
         W, H = slide.dimensions
@@ -210,6 +222,8 @@ def main():
         latent = torch.randn((1, self.unet.in_channels, H // 8, W // 8), device=self.device)
         count = torch.zeros_like(latent)
         value = torch.zeros_like(latent)
+        
+        for step_idx = 
 
         for coord in coords_list:
             x, y = coord
