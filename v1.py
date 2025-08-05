@@ -279,7 +279,7 @@ def main():
             region_tensor = preprocess_region(region_img)
 
             z_0_patch = model.get_first_stage_encoding(model.encode_first_stage(region_tensor))  # shape: [1, C, h//8, w//8]
-            # encode_ddim是一个“加噪”的过程
+            # encode_ddim是一个“加噪”的过程，实现的
             z_T_patch, _ = sampler.encode_ddim(
                     z_0_patch.clone(),
                     num_steps=ddim_inversion_steps,

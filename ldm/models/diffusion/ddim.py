@@ -327,7 +327,8 @@ class DDIMSampler(object):
         for i, t in enumerate(iterator):
             if i > end_step:
                 break
-            img, pred_x0 = self.reverse_ddim(img, t, t_next=steps[i+1] ,c=conditioning, unconditional_conditioning=unconditional_conditioning, unconditional_guidance_scale=unconditional_guidance_scale)
+            img, pred_x0 = self.reverse_ddim(img, t, t_next=steps[i+1] ,c=conditioning, unconditional_conditioning=unconditional_conditioning, unconditional_guidance_scale=un
+            conditional_guidance_scale)
             if t in callback_ddim_timesteps_list:
                 if img_callback: img_callback(pred_x0, img, t)
 
