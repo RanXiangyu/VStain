@@ -195,6 +195,7 @@ class DDIMSampler(object):
             injected_features_i = injected_features[i]\
                 if (injected_features is not None and len(injected_features) > 0) else None
             negative_prompt_alpha_i = negative_prompt_alpha_schedule[i]
+            # 如果提供了injected_features，则将对应步骤的特征传递给p_sample_ddim，所以传过来的得是一整个featmaps（到ddim_sampling）
             outs = self.p_sample_ddim(img, cond, ts, index=index, use_original_steps=ddim_use_original_steps,
                                       negative_conditioning=negative_conditioning,
                                       quantize_denoised=quantize_denoised, temperature=temperature,
@@ -231,6 +232,7 @@ class DDIMSampler(object):
                       ):
         b, *_, device = *x.shape, x.device
 
+         # 没有传入negative_conditioning
         if negative_conditioning is not None:
             x_in = torch.cat([x] * 2)
             t_in = torch.cat([t] * 2)

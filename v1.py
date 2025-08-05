@@ -144,13 +144,15 @@ def feature_extractorde(
             img_z_enc = torch.clone(img_feature[0]['z_enc'])
         return img_feature, z_enc_startstep
 
-    
+    # 2. 进行ddim反演，获取特征图
+
     init_img = model.get_first_stage_encoding(model.encode_first_stage(init_img))  # [1, 4, 64, 64] z_0
     img_z_enc, _ = sampler.encode_ddim(init_img.clone(), num_steps = ddim_inversion_steps, \ 
                                         unconditional_conditioning = uc, \
                                         end_step = time_idx_dict[ddim_inversion_steps - 1 - start_step], \
                                         callback_ddim_timesteps = save_feature_timesteps, \
                                         img_callback = ddim_sampler_callback)
+    
     img_feature = copy.deepcopy(feat_maps)
     # img_z_enc = feat_maps[0]['z_enc']
     img_z_enc = img_feature[0]['z_enc']
@@ -200,6 +202,7 @@ def main():
     # ddimsampler准备
     sampler = DDIMSampler(model)
     sampler.make_schedule(ddim_num_steps=ddim_steps, ddim_eta=opt.ddim_eta, verbose=False) # ddim_steps就是循环采样的步数
+    # 在这个地方schedule之后，sampler.ddim_timesteps 就是采样的时间步已经确定了
 
     # 获取ddim的时间步和索引映射 并反转 
     time_range = np.flip(sampler.ddim_timesteps)
@@ -213,6 +216,8 @@ def main():
         iterator = tqdm(time_range, desc='DDIM Sampler', total=total_steps) # 进度条包装
         for i, step in enumerate(iterator):
     —— 所以在主程序的逻辑循环中，应该是reverse的sampler.ddim_timestep，也就是time_range
+    idx time_dict = {981: 0, 961: 1, ... 1: 50} 1-50索引 1-1000timestep
+    time_idx_dict = {0: 981, 1: 961, ... 49: 21, 50: 1}
     """
     idx_time_dict = {} # 去噪时间步：ddim顺序索引
     time_idx_dict = {} # ddim索引：去噪时间步
@@ -256,16 +261,42 @@ def main():
         W, H = slide.dimensions
 
         # 创建全景图需要的张量
-        latent = torch.randn((1, opt.C_latent, H // 8, W // 8), device=self.device)
+        latent = torch.zeros((1, opt.C_latent, H // 8, W // 8), device=self.device)
         count = torch.zeros_like(latent)
         value = torch.zeros_like(latent)
+        blank = torch.zeros((H_latent, W_latent), dtype=torch.bool, device=device) # 记录有哪些部分没有被去燥，clam已经去掉的部分
 
         patch_size = opt.patch_size
         patch_size_latent = opt.patch_size // 8 # 在潜空间当中需要缩放8倍
-        
+
+        # 初始latent的获取过程，ddim reverse
+        for coord in tqdm(coords_list, desc="Encoding patches", unit="patch"):
+            x_pixel, y_pixel = coord
+            x_latent = x_pixel // 8
+            y_latent = y_pixel // 8
+
+            region_img = slide.read_region((x_pixel, y_pixel), 0, (patch_size, patch_size)).convert("RGB")
+            region_tensor = preprocess_region(region_img)
+
+            z_0_patch = model.get_first_stage_encoding(model.encode_first_stage(region_tensor))  # shape: [1, C, h//8, w//8]
+            # encode_ddim是一个“加噪”的过程
+            z_T_patch, _ = sampler.encode_ddim(
+                    z_0_patch.clone(),
+                    num_steps=ddim_inversion_steps,
+                    unconditional_conditioning=uc,
+                    end_step=time_idx_dict[ddim_inversion_steps - 1 - start_step]
+                )
+
+            latent[:, :, y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent] += z_T_patch
+            count[:, :, y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent] += 1
+            blank[y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent] = True # 记录有哪些部分被包含到去噪list当中 
+
+        latent = torch.where(count > 0, latent / count, latent)  # 避免除以0
+
+
         iterator = tqdm(time_range, desc='DDIM Sampler', total=total_steps)
 
-        for i,  step in enumerate(iterator):
+        for i,  step in enumerate(iterator):                
             count.zero_()
             value.zero_()
 
@@ -274,12 +305,7 @@ def main():
                 x_latent = x_pixel // 8
                 y_latent = y_pixel // 8
 
-                # region预处理
-                region = slide.read_region((x_pixel, y_pixel), 0, (patch_size, patch_size)).convert("RGB")
-                region_tensor = preprocess_region(region)
-
                 # 特征提取
-
                 latent_patch = latent[:, :, y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent]
 
                 # 进行处理
