@@ -175,7 +175,7 @@ class MultiDiffusion(nn.Module):
 
                     # compute the denoising step with the reference model
                     # 执行扩散第一步
-                    latents_view_denoised = self.scheduler.step(noise_pred, t, latent_view)['prev_sample'] # 返回一个结构体DDIMSchedulerOutput
+                    latents_view_denoised = self.scheduler.step(noise_pred, t, latent_view)['prev_sample'] # 返回一个结构体DDIMSchedulerOutput 在当前去噪步骤 t，经过模型计算后得到的、对应于“上一个”（即噪声更少的）时间步 t-1 的图像块（view）的潜在表示（latent）
                     # 将patch加入融合图像当中
                     value[:, :, h_start:h_end, w_start:w_end] += latents_view_denoised
                     count[:, :, h_start:h_end, w_start:w_end] += 1

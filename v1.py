@@ -45,6 +45,27 @@ def load_model_from_config(config_path, ckpt_path, device="cuda", verbose=False)
     model.eval()
     return model
 
+# wsi划分
+# 将全景图划分为多个重叠的小窗口，全景图的高度，全景图的宽度，每个处理窗口的大小，相邻窗口的步长
+def get_views(panorama_height, panorama_width, window_size=64, stride=8):
+    # 潜在空间为 1/8
+    panorama_height /= 8
+    panorama_width /= 8
+    # 计算在给定的宽度和高度下，需要多少个窗口；滑动窗口的标准计算方式
+    num_blocks_height = (panorama_height - window_size) // stride + 1
+    num_blocks_width = (panorama_width - window_size) // stride + 1
+    total_num_blocks = int(num_blocks_height * num_blocks_width)
+
+    # 生成窗口坐标
+    # 逻辑是从左到右从上到下
+    views = []
+    for i in range(total_num_blocks): # i ： 0 - n-1
+        h_start = int((i // num_blocks_width) * stride)
+        h_end = h_start + window_size
+        w_start = int((i % num_blocks_width) * stride)
+        w_end = w_start + window_size
+        views.append((h_start, h_end, w_start, w_end))
+    return views
 
 def get_opt():
     parser = argparse.ArgumentParser()
@@ -104,7 +125,7 @@ def preprocess_region(region: Image.Image):
     return 2. * image - 1.  # 映射到 [-1, 1]
 
 # 特征提取 在特定的时间步 save_feature_timesteps
-def feature_extractorde(
+def feature_extractor(
     img_dir, 
     img_name, 
     feature_dir, 
@@ -164,6 +185,61 @@ def feature_extractorde(
             pickle.dump(img_feature, f)
 
     return img_feature, img_z_enc
+
+
+    def wsi_decode(
+        latent_tensor: torch.Tensor,
+        model: nn.Module,
+        patch_size: int,
+        stride: int,
+        downsample_factor: int = 8,
+        device: str = 'cuda',
+        verbose: bool = True
+    ) -> np.ndarray:
+    """
+    Args:
+        latent_tensor (torch.Tensor): 需要解码的完整latent张量，形状为 (1, C, H_latent, W_latent)。
+        model (nn.Module): 包含 .decode_first_stage 方法的模型实例 (如 Stable Diffusion 的 VAE)。
+        patch_size (int): 在latent空间中每个图块的大小。需要实验找到显存能承受的最大值以提高效率。
+        stride (int): 在latent空间中滑动的步长。必须小于 patch_size 以形成重叠。
+        downsampling_factor (int): VAE模型的下采样因子，通常是 8。
+        device (str): 用于解码的设备，例如 'cuda' 或 'cpu'。
+        verbose (bool): 是否显示进度条。
+
+    Returns:
+        np.ndarray: 解码并拼接完成的最终RGB图像，形状为 (H, W, 3)，数据类型为 uint8。
+    """
+    if stride > patch_size:
+        raise ValueError("Stride must be less than or equal to patch_size for overlapping.")
+
+    with torch.no_grad():
+        B, C, H_latent, W_latent = latent_tensor.shape
+
+        H_pixel, W_pixel = H_latent * downsample_factor, W_latent * downsample_factor
+
+        # 在cpu内存中创建最终输出图像画布
+        output_image = np.zeros((H_pixel, W_pixel, 3), dtype=np.uint8)
+
+        latent_tensor = latent_tensor.to(cpu) # 小块传输到gpu
+
+        # 创建迭代器和进度条
+        y_steps = range(0, H_latent, stride)
+        x_steps = range(0, W_latent, stride)
+
+        if verbose:
+            for x in x_steps:
+                # 1. 切分出一个patch
+                y_end = min(y + patch_size, H_latent)
+                x_end = min(x + patch_size, W_latent)
+                latent_patch = latent_tensor[:, :, y:y_end, x:x_end]  # 获取
+
+                # 2. 将小块送到GPU并执行编码
+                latent_patch_gpu = latent_patch.to(device)
+                decoded_patch_gpu = model.decode_first_stage(latent_patch_gpu)  # 解码
+                
+
+
+
 
 def main():
     opt = get_opt()
@@ -253,21 +329,43 @@ def main():
         sty_feature, sty_z_enc = feature_extractor(opt.sty, sty_img, feature_dir, model, sampler, ddim_inversion_steps, uc, time_idx_dict, opt.start_step, save_feature_timesteps, ddim_sampler_callback, save_feat=True)
 
 
+    
+
+
     # 遍历所有h5文件
     for idx, h5_file in tqdm(enumerate(h5_files), total=len(h5_files), desc="Processing H5 files"):
         # 读取坐标列表 打开slide
         coords_list = read_h5_coords(h5_files[idx])
         slide = openslide.OpenSlide(wsi_files[idx])
         W, H = slide.dimensions
+        
+        patch_size = opt.patch_size
+        patch_size_latent = opt.patch_size // 8 # 在潜空间当中需要缩放8倍
 
         # 创建全景图需要的张量
         latent = torch.zeros((1, opt.C_latent, H // 8, W // 8), device=self.device)
         count = torch.zeros_like(latent)
         value = torch.zeros_like(latent)
-        blank = torch.zeros((H_latent, W_latent), dtype=torch.bool, device=device) # 记录有哪些部分没有被去燥，clam已经去掉的部分
+        blank = torch.zeros_like(latent) # 记录有哪些部分没有被去噪，clam已经去掉的部分
+        
+        # 构建并保存原始图像的latent —— 用于融合
+        original_z0 = torch.zeros_like(latent)
 
-        patch_size = opt.patch_size
-        patch_size_latent = opt.patch_size // 8 # 在潜空间当中需要缩放8倍
+        # 循环遍历coords_list，处理背景 不应该是coord_list
+        for coord in tqdm(coords_list, desc="Building Original z0", unit="patch"):
+            x_pixel, y_pixel = coord
+            x_latent, y_latent = x_pixel // 8, y_pixel // 8
+
+            region_img = slide.read_region((x_pixel, y_pixel), 0, (patch_size, patch_size)).convert("RGB")
+            region_tensor = preprocess_region(region_img)
+
+            # 只进行VAE编码，不加噪
+            z_0_patch = model.get_first_stage_encoding(model.encode_first_stage(region_tensor))
+        
+            original_z0[:, :, y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent] += z_0_patch
+
+        original_z0 = torch.where(count_for_z0 > 0, original_z0 / count_for_z0, original_z0)
+        # 至此，original_z0 准备完毕，它包含了精确的原始H&E背景latent
 
         # 初始latent的获取过程，ddim reverse
         for coord in tqdm(coords_list, desc="Encoding patches", unit="patch"):
@@ -289,27 +387,77 @@ def main():
 
             latent[:, :, y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent] += z_T_patch
             count[:, :, y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent] += 1
-            blank[y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent] = True # 记录有哪些部分被包含到去噪list当中 
+            blank[:, :, y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent] = True # 记录有哪些部分被包含到去噪list当中 
 
         latent = torch.where(count > 0, latent / count, latent)  # 避免除以0
 
 
         iterator = tqdm(time_range, desc='DDIM Sampler', total=total_steps)
 
+        # 开启循环 遍历50步DDIM去噪
         for i,  step in enumerate(iterator):                
             count.zero_()
             value.zero_()
-
+            
+            # 循环遍历每个窗口
             for coord in coords_list:
                 x_pixel, y_pixel = coord # 在潜空间当中需要缩放8倍
                 x_latent = x_pixel // 8
                 y_latent = y_pixel // 8
 
-                # 特征提取
+                # 进行处理 在这一步为了简化，直接尝试采用每一步提取qkv
+                # 1. 提取当前内容图的patch
+                region_img = slide.read_region((x_pixel, y_pixel), 0, (patch_size, patch_size)).convert("RGB")
+                region_tensor = preprocess_region(region_img)
+                # a. VAE编码
+                z_0_patch = model.get_first_stage_encoding(model.encode_first_stage(region_tensor))  # shape: [1, C, h//8, w//8]
+                # b. DDIM Inversion 捕获特征
+
+                
+                injected_features_i = injected_features[i] 
+
+                # 从全局latent当中提取出 patch view
                 latent_patch = latent[:, :, y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent]
 
-                # 进行处理
+                # 2. 执行单步去噪
+                latents_view_denoised, _ = self.p_sample_ddim(
+                    img, cond, ts, index=index, 
+                    use_original_steps=ddim_use_original_steps, 
+                    negative_conditioning=negative_conditioning,
+                    quantize_denoised=quantize_denoised, temperature=temperature,
+                    noise_dropout=noise_dropout, score_corrector=score_corrector,
+                    corrector_kwargs=corrector_kwargs,
+                    unconditional_guidance_scale=unconditional_guidance_scale,
+                    unconditional_conditioning=unconditional_conditioning,
+                    injected_features=injected_features_i,
+                    negative_prompt_alpha=negative_prompt_alpha_i,
+                    style_loss=style_loss,style_guidance_scale=style_guidance,style_img=style_img,
+                    content_guidance_scale=content_guidance,
+                )
 
+                value[:, :, y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent] += latents_view_denoised
+                count[:, :, y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent] += 1
+
+            # 融合所有patches -- new latent
+            latent = torch.where(count > 0, value / count, value)
+
+        
+        # 循环结束之后，解码 latent 空间
+        # a. 白色背景latent向量填充blank为false的部分
+        final_combined_latent = torch.where(
+            blank,                # 条件：如果这个区域被处理过 (True)
+            latent,               # 就使用去噪生成的结果
+            original_z0           # 否则 (False)，就使用原始H&E图的latent（即背景latent）
+        )
+
+
+
+
+        
+
+
+
+                
 
 
 

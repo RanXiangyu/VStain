@@ -16,6 +16,7 @@ class FeatureHook:
     def save_feature_map(self, feature_map, filename, time):
         cur_idx = idx_time_dict[time]
         self.feat_maps[cur_idx][f"{filename}"] = feature_map
+        # 调用save_feature_map时，是对于全局变量feat_maps进行更新操作
 
     # 保存当前时间步的所有 q//k/v 特征图
     def save_qkv(self, blocks, time, feature_type="output_block"):
@@ -37,6 +38,11 @@ class FeatureHook:
     def save_qkv_callback(self, time):
         self.save_qkv(self.unet_model.output_blocks , time, "output_block")
 
+    # 保存单个时间步的callback 用于encode_ddim中
+    def save_p_qkv_callback(self, pred_x0, xt, time):
+        self.save_qkv(self.unet_model.output_blocks , time, "output_block")
+
     def ddim_sampler_callback(self, pred_x0, xt, time):
         self.save_qkv_callback(time) # [B, num_heads, N, head_dim]
         self.save_feature_map(xt, 'z_enc', time) # [B, C, H, W]（latent）保存图像本身在潜空间的内容，可以可视化图像的演化过程
+        

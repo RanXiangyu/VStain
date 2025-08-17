@@ -303,11 +303,12 @@ class DDIMSampler(object):
             noise = torch.nn.functional.dropout(noise, p=noise_dropout)
         x_prev = a_prev.sqrt() * pred_x0 + dir_xt + noise
         return x_prev, pred_x0
+        # x_prev: 上一个时间步的、噪声更少的图像。它将被作为下一次调用这个函数的输入 x。pred_x0: 当前步骤预测出的最终图像。虽然它不是最终结果，但在每一步都可以预览一下，看看生成过程是否正常。
 
     @torch.no_grad()
     def encode_ddim(self, img, num_steps, conditioning=None, unconditional_conditioning=None ,unconditional_guidance_scale=1., \
                     end_step=999, callback_ddim_timesteps=None, img_callback=None):
-        
+        # callback_ddim_timesteps 是[980 - 0]这样的一个倒叙的列表
         print(f"Running DDIM inversion with {num_steps} timesteps")
         if num_steps == 999:
             T = 999
