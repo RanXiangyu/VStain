@@ -255,6 +255,7 @@ def main(opt):
             # 每当时间步是 callback_ddim_timesteps 中的值，就将当前特征加入feat_maps
             # encode_ddim(输入图像latent x0， 采样步骤，conditioning条件编码比如文本， unconditional_conditioning无条件编码，CFG scale, end_step结束步长，callback_ddim_timesteps指定在某些t调用回调——为了触发img_callback，img_callback图像回调函数)
             # 返回sty_z_enc是采样最后一步的x_T，即DDIM反向的起点 和feat_maps，但返回值没有用到，encode是为了在ddim的过程中调用回掉函数
+            # time_idx_dict[ddim_inversion_steps-1-start_step = 0] =981 怀疑这一步写错了 end_step=0-50
             """
             sty_feat = copy.deepcopy(feat_maps) # 保存callback特征信息
             sty_z_enc = feat_maps[0]['z_enc'] # 提取第一个 step 时的 latent 编码，通常是最后一个 DDIM 时间步（最噪声的 z_T） ｜｜ 提取 z_enc 作为该风格图像的最终 latent 表示 ｜｜确保能够重构出图片

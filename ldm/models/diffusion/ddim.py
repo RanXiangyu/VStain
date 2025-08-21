@@ -316,6 +316,7 @@ class DDIMSampler(object):
             iterator = tqdm(range(0,T ,c), desc='DDIM Inversion', total= num_steps)
             steps = list(range(0,T + c,c))
         else:
+            # 如果是自定义步数 例如 T=1000, num_steps=50 → c=20，那么 time_steps = [1, 21, 41, ..., 981]
             T = self.ddpm_num_timesteps
             c = T // num_steps
             time_steps= range(1, T, c)
@@ -326,6 +327,7 @@ class DDIMSampler(object):
         callback_ddim_timesteps_list = np.flip(make_ddim_timesteps("uniform", callback_ddim_timesteps, self.ddpm_num_timesteps))\
             if callback_ddim_timesteps is not None else np.flip(self.ddim_timesteps)
         for i, t in enumerate(iterator):
+            # i, t = 0 1000; 1 980; 2 960 ... 49 20
             if i > end_step:
                 break
             img, pred_x0 = self.reverse_ddim(img, t, t_next=steps[i+1] ,c=conditioning, unconditional_conditioning=unconditional_conditioning, unconditional_guidance_scale=un

@@ -19,7 +19,7 @@ class FeatureHook:
         # 调用save_feature_map时，是对于全局变量feat_maps进行更新操作
 
     # 保存当前时间步的所有 q//k/v 特征图
-    def save_qkv(self, blocks, time, feature_type="output_block"):
+    def save_style_kv(self, blocks, time, feature_type="output_block"):
         block_idx = 0
         # stable diffusion的上采样 output_blocks有12个，在命令行输入的时候确定了再那几个图层进行保存qkv
         for block_idx, block in enumerate(blocks):
@@ -27,22 +27,33 @@ class FeatureHook:
                 # 包含多个子模块 并且是spatial transformer 通常在block[1]中
                 if block_idx in self_attn_output_block_indices:
                     # self-attn
-                    q = block[1].transformer_blocks[0].attn1.q
+                    # q = block[1].transformer_blocks[0].attn1.q
                     k = block[1].transformer_blocks[0].attn1.k
                     v = block[1].transformer_blocks[0].attn1.v
-                    self.save_feature_map(q, f"{feature_type}_{block_idx}_self_attn_q", time)
+                    # self.save_feature_map(q, f"{feature_type}_{block_idx}_self_attn_q", time)
                     self.save_feature_map(k, f"{feature_type}_{block_idx}_self_attn_k", time)
                     self.save_feature_map(v, f"{feature_type}_{block_idx}_self_attn_v", time)
     
+    def save_q_only(self, blocks, time, feature_type="output_block"):
+        """遍历U-Net的Blocks，只提取并保存q特征。"""
+        print(f"    -> Inside callback: Extracting Q-features at time {time}...")
+        for block_idx, block in enumerate(blocks):
+            if len(block) > 1 and "SpatialTransformer" in str(type(block[1])):
+                # 假设 self_attn_output_block_indices 是一个包含目标层索引的列表
+                if block_idx in self.self_attn_output_block_indices:
+                    q = block[1].transformer_blocks[0].attn1.q
+                    # 只保存 q 特征
+                    self.save_feature_map(q, f"{feature_type}_{block_idx}_self_attn_q", time)
+    
     # 保存当前时间步的所有特征图
-    def save_qkv_callback(self, time):
-        self.save_qkv(self.unet_model.output_blocks , time, "output_block")
+    def save_style_kv_callback(self, time):
+        self.save(self.unet_model.output_blocks , time, "output_block")
 
     # 保存单个时间步的callback 用于encode_ddim中
-    def save_p_qkv_callback(self, pred_x0, xt, time):
-        self.save_qkv(self.unet_model.output_blocks , time, "output_block")
+    def content_q_update_callback(self, pred_x0, xt, time):
+        self.save_q_only(self.unet_model.output_blocks, time, "output_block")
 
     def ddim_sampler_callback(self, pred_x0, xt, time):
-        self.save_qkv_callback(time) # [B, num_heads, N, head_dim]
+        self.save_style_kv_callback(time) # [B, num_heads, N, head_dim]
         self.save_feature_map(xt, 'z_enc', time) # [B, C, H, W]（latent）保存图像本身在潜空间的内容，可以可视化图像的演化过程
         
