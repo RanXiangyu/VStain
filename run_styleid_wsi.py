@@ -25,6 +25,13 @@ import pickle
     --gamma 0.75 --T 1.5
     --precomputed /data2/ranxiangyu/styleid_out/precomputed_feats \
 
+    python run_styleid.py \
+    --cnt /data2/ranxiangyu/kidney_patch/patch_png/level1/22811he \
+    --sty /data2/ranxiangyu/styleid_out/style \
+    --output_path /data2/ranxiangyu/styleid_out/style_out/he2masson \
+    --gamma 0.75 --T 1.5
+    --precomputed /data2/ranxiangyu/styleid_out/precomputed_feats \
+
 '''
 
 feat_maps = [] # 全局变量，用于存储特征图

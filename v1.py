@@ -7,6 +7,12 @@ import openslide
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from omegaconf import OmegaConf
+import torch
+import torch.nn as nn
+import torchvision.transforms as transforms
+import pickle
+import copy
+
 
 from utils.hdf5 import get_sorted_h5_files, get_sorted_wsi_files, read_h5_coords
 from utils.feature_hook import FeatureHook
@@ -71,7 +77,7 @@ def get_opt():
     parser = argparse.ArgumentParser()
     # 文件路径设置
     parser.add_argument('--wsi', help='Path to WSI file', required=True)
-    parser.add_argument('--sty'， help='Path to style image', required=True)
+    parser.add_argument('--sty', help='Path to style image', required=True)
     parser.add_argument('--out', help='Output directory', required=True)
     # 切片和hdf5设置
     parser.add_argument('--patch_size', type=int, default=512, help='Size of the patches')
@@ -124,6 +130,7 @@ def preprocess_region(region: Image.Image):
     image = torch.from_numpy(image)
     return 2. * image - 1.  # 映射到 [-1, 1]
 
+"""
 # 特征提取 在特定的时间步 save_feature_timesteps
 def feature_extractor(
     # --- 通用参数 ---
@@ -162,7 +169,6 @@ def feature_extractor(
             raise ValueError(f"'target_step_num' must be between 1 and {ddim_inversion_steps}.")
 
         # 1. 计算循环 i和 确切的时间步
-        target_step_num = 30
         target_timestep_t = time_idx_dict[target_step_index] # 实际时间步 t
 
         # 2. 执行DDIM反演
@@ -206,7 +212,62 @@ def feature_extractor(
                 pickle.dump(img_feature, f)
 
         return img_feature, img_z_enc
+"""
+def extract_style_features(
+    # --- 通用参数 ---
+    purpose='style', # 模式 ('style' 或 'content')
+    model, 
+    sampler, 
+    uc,
+    time_idx_dict, 
+    save_feature_timesteps,
+    ddim_sampler_callback=None,
+    ddim_inversion_steps=50, 
+    # --- style参数 ---
+    img_dir,
+    img_name, 
+    feature_dir, 
+    start_step=49, 
+    save_feat=False
+    ):
 
+    global feat_maps
+    feat_maps = []
+    
+    img_feature = None
+    img_z_enc = None
+    
+    img_path = os.path.join(img_dir, img_name)
+    init_img = preprocess_img(img_path).to('cuda')
+    img_feat_name = os.path.join(feature_dir, os.path.basename(img_name).split('.')[0] + '_sty.pkl')
+
+    # 1. 直接加载特征返回 style图片
+    if os.path.exists(img_feat_name):
+        print(f"[✓] Loading style feature from {img_feat_name}")
+        with open(img_feat_name, 'rb') as f:
+            img_feature = pickle.load(f)
+            img_z_enc = torch.clone(img_feature[0]['z_enc'])
+        return img_feature, z_enc_startstep
+
+    # 2. 进行ddim反演，获取特征图
+    init_img = model.get_first_stage_encoding(model.encode_first_stage(init_img))  # [1, 4, 64, 64] z_0
+    img_z_enc, _ = sampler.encode_ddim(init_img.clone(), num_steps = ddim_inversion_steps, \ 
+                                            unconditional_conditioning = uc, \
+                                            end_step = time_idx_dict[ddim_inversion_steps - 1 - start_step], \
+                                            callback_ddim_timesteps = save_feature_timesteps, \
+                                            img_callback = ddim_sampler_callback)
+        
+    img_feature = copy.deepcopy(feat_maps)
+    # img_z_enc = feat_maps[0]['z_enc']
+    img_z_enc = img_feature[0]['z_enc']
+
+
+    if save_feat and len(feature_dir) > 0:
+        print(f"Saving style feature to {img_feat_name}")
+        with open(img_feat_name, 'wb') as f:
+            pickle.dump(img_feature, f)
+
+    return img_feature, img_z_enc
 
 def wsi_decode(
         latent_tensor: torch.Tensor,
@@ -248,6 +309,9 @@ def wsi_decode(
         x_steps = range(0, W_latent, stride)
 
         if verbose:
+            pbar = tqdm(total=len(y_steps) * len(x_steps), desc="Tiled Decoding")
+
+        for y in y_steps:
             for x in x_steps:
                 # 1. 切分出一个patch
                 y_end = min(y + patch_size, H_latent)
@@ -300,6 +364,8 @@ def wsi_decode(
 
 def main():
     opt = get_opt()
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     wsi_extractor = WSIPatchExtractor(
         source=opt.wsi,
@@ -369,7 +435,7 @@ def main():
         attn_layer_idics=qkv_extraction_block_indices,
         unet_model=unet
     )
-    ddim_sampler_callback = feature_hook.ddim_sampler_callback
+    sty_ddim_sampler_callback = feature_hook.ddim_sampler_callback
     save_qkv_callback = feature_hook.save_qkv_callback
     save_qkv = feature_hook.save_qkv
 
@@ -382,9 +448,10 @@ def main():
 
     # 风格图片特征提取
     sty_img_list = sorted(os.listdir(opt.sty))  # 获取风格图片列表 
-    # for sty_img in sty_img_list:
-    sty_feature, sty_z_enc = feature_extractor(opt.sty, sty_img, feature_dir, model, sampler, ddim_inversion_steps, uc, time_idx_dict, opt.start_step, save_feature_timesteps, ddim_sampler_callback, save_feat=True)
+    # sty_feature, sty_z_enc = feature_extractor(opt.sty, sty_img, feature_dir, model, sampler, ddim_inversion_steps, uc, time_idx_dict, opt.start_step, save_feature_timesteps, ddim_sampler_callback, save_feat=True)
     
+    for sty_img in sty_img_list:
+        sty_feat, sty_z_enc = extract_style_features(purpose='style', img_dir=opt.sty, img_name=sty_img, feature_dir=feature_dir,save_feat=True,start_step=opt.start_step, model=model, sampler=sampler, uc=uc, time_idx_dict=time_idx_dict, ddim_sampler_callback=sty_ddim_sampler_callback, ddim_inversion_steps=ddim_inversion_steps, save_feature_timesteps=save_feature_timesteps)
 
     # 遍历所有h5文件
     for idx, h5_file in tqdm(enumerate(h5_files), total=len(h5_files), desc="Processing H5 files"):
@@ -397,16 +464,17 @@ def main():
         patch_size_latent = opt.patch_size // 8 # 在潜空间当中需要缩放8倍
 
         # 创建全景图需要的张量
-        latent = torch.zeros((1, opt.C_latent, H // 8, W // 8), device=self.device)
+        latent = torch.zeros((1, opt.C_latent, H // 8, W // 8), device=device)
         count = torch.zeros_like(latent)
         value = torch.zeros_like(latent)
         blank = torch.zeros_like(latent) # 记录有哪些部分没有被去噪，clam已经去掉的部分
         
         # 构建并保存原始图像的latent —— 用于融合
         original_z0 = torch.zeros_like(latent)
+        views = get_views(panorama_height=H, panorama_width=W,window_size=512, stride=512)
 
         # 循环遍历coords_list，处理背景 不应该是coord_list
-        for coord in tqdm(coords_list, desc="Building Original z0", unit="patch"):
+        for coord in tqdm(views, desc="Building Original z0", unit="patch"):
             x_pixel, y_pixel = coord
             x_latent, y_latent = x_pixel // 8, y_pixel // 8
 
@@ -418,7 +486,7 @@ def main():
         
             original_z0[:, :, y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent] += z_0_patch
 
-        original_z0 = torch.where(count_for_z0 > 0, original_z0 / count_for_z0, original_z0)
+        # original_z0 = torch.where(count_for_z0 > 0, original_z0 / count_for_z0, original_z0)
         # 至此，original_z0 准备完毕，它包含了精确的原始H&E背景latent
 
         # 初始latent的获取过程，ddim reverse
@@ -429,7 +497,6 @@ def main():
 
             region_img = slide.read_region((x_pixel, y_pixel), 0, (patch_size, patch_size)).convert("RGB")
             region_tensor = preprocess_region(region_img)
-
             z_0_patch = model.get_first_stage_encoding(model.encode_first_stage(region_tensor))  # shape: [1, C, h//8, w//8]
             # encode_ddim是一个“加噪”的过程，实现的
             z_T_patch, _ = sampler.encode_ddim(
@@ -447,10 +514,6 @@ def main():
 
 
         iterator = tqdm(time_range, desc='DDIM Sampler', total=total_steps)
-
-
-        
-
 
         # 开启循环 遍历50步DDIM去噪
         for i,  step in enumerate(iterator):                
@@ -470,7 +533,13 @@ def main():
                 # a. VAE编码
                 z_0_patch = model.get_first_stage_encoding(model.encode_first_stage(region_tensor))  # shape: [1, C, h//8, w//8]
                 # b. DDIM Inversion 捕获特征
-
+                # _ = feature_extractor(purpose='content', model=model, sampler=sampler, uc=uc, time_idx_dict=time_idx_dict, ddim_sampler_callback=ddim_sampler_callback, direct_latent_input=z_0_patch, target_step_num=i)
+                target_timestep_t = time_idx_dict[target_step_index]
+                _, _ = sampler.encode_ddim(direct_latent_input.clone(), num_steps=ddim_inversion_steps,
+                                            unconditional_conditioning=uc,
+                                            end_step=target_step_num,
+                                            callback_ddim_timesteps=[target_timestep_t],
+                                            img_callback=ddim_sampler_callback)
                 
                 injected_features_i = injected_features[i] 
 
@@ -478,7 +547,7 @@ def main():
                 latent_patch = latent[:, :, y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent]
 
                 # 2. 执行单步去噪
-                latents_view_denoised, _ = self.p_sample_ddim(
+                latents_view_denoised, _ = sampler.p_sample_ddim(
                     img, cond, ts, index=index, 
                     use_original_steps=ddim_use_original_steps, 
                     negative_conditioning=negative_conditioning,
@@ -521,15 +590,5 @@ def main():
         final_wsi_img.save(os.path.join(opt.out, f"final_decoded_{idx}.tiff"))
 
 
-
-
-
-
-        
-
-
-
-                
-
-
-
+if __name__ == "__main__":
+    main()
