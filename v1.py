@@ -20,7 +20,6 @@ from utils.feature_hook import FeatureHook
 from ldm.util import instantiate_from_config
 from ldm.models.diffusion.ddim import DDIMSampler
 
-
 # from create_patches_fp import WSIPatchExtractor
 from patches_utils.create_patches_fp import WSIPatchExtractor
 
@@ -195,7 +194,7 @@ def feature_extractor(
 
         # 2. 进行ddim反演，获取特征图
         init_img = model.get_first_stage_encoding(model.encode_first_stage(init_img))  # [1, 4, 64, 64] z_0
-        img_z_enc, _ = sampler.encode_ddim(init_img.clone(), num_steps = ddim_inversion_steps, \ 
+        img_z_enc, _ = sampler.encode_ddim(init_img.clone(), num_steps = ddim_inversion_steps, \
                                             unconditional_conditioning = uc, \
                                             end_step = time_idx_dict[ddim_inversion_steps - 1 - start_step], \
                                             callback_ddim_timesteps = save_feature_timesteps, \
@@ -215,20 +214,19 @@ def feature_extractor(
 """
 def extract_style_features(
     # --- 通用参数 ---
-    purpose='style', # 模式 ('style' 或 'content')
     model, 
     sampler, 
     uc,
     time_idx_dict, 
     save_feature_timesteps,
-    ddim_sampler_callback=None,
-    ddim_inversion_steps=50, 
     # --- style参数 ---
     img_dir,
     img_name, 
     feature_dir, 
     start_step=49, 
-    save_feat=False
+    save_feat=False,
+    ddim_inversion_steps=50, 
+    ddim_sampler_callback=None
     ):
 
     global feat_maps
@@ -251,7 +249,7 @@ def extract_style_features(
 
     # 2. 进行ddim反演，获取特征图
     init_img = model.get_first_stage_encoding(model.encode_first_stage(init_img))  # [1, 4, 64, 64] z_0
-    img_z_enc, _ = sampler.encode_ddim(init_img.clone(), num_steps = ddim_inversion_steps, \ 
+    img_z_enc, _ = sampler.encode_ddim(init_img.clone(), num_steps = ddim_inversion_steps, \
                                             unconditional_conditioning = uc, \
                                             end_step = time_idx_dict[ddim_inversion_steps - 1 - start_step], \
                                             callback_ddim_timesteps = save_feature_timesteps, \

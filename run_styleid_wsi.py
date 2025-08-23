@@ -25,12 +25,12 @@ import pickle
     --gamma 0.75 --T 1.5
     --precomputed /data2/ranxiangyu/styleid_out/precomputed_feats \
 
-    python run_styleid.py \
-    --cnt /data2/ranxiangyu/kidney_patch/patch_png/level1/22811he \
-    --sty /data2/ranxiangyu/styleid_out/style \
-    --output_path /data2/ranxiangyu/styleid_out/style_out/he2masson \
-    --gamma 0.75 --T 1.5
-    --precomputed /data2/ranxiangyu/styleid_out/precomputed_feats \
+    python v1.py \
+    --wsi /data2/ranxiangyu/vstain/wsi \
+    --sty /data2/ranxiangyu/vstain/sty \
+    --out /data2/ranxiangyu/vstain \
+    --stride 32 \
+    --batch_size 1
 
 '''
 
