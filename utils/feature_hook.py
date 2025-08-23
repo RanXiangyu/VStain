@@ -14,7 +14,7 @@ class FeatureHook:
 
     # 保存单个时间步的 q//k/v 特征图
     def save_feature_map(self, feature_map, filename, time):
-        cur_idx = idx_time_dict[time]
+        cur_idx = self.idx_time_dict[time]
         self.feat_maps[cur_idx][f"{filename}"] = feature_map
         # 调用save_feature_map时，是对于全局变量feat_maps进行更新操作
 
@@ -25,7 +25,7 @@ class FeatureHook:
         for block_idx, block in enumerate(blocks):
             if len(block) > 1 and "SpatialTransformer" in str(type(block[1])):
                 # 包含多个子模块 并且是spatial transformer 通常在block[1]中
-                if block_idx in self_attn_output_block_indices:
+                if block_idx in self.attn_layer_idics:
                     # self-attn
                     # q = block[1].transformer_blocks[0].attn1.q
                     k = block[1].transformer_blocks[0].attn1.k
@@ -47,7 +47,7 @@ class FeatureHook:
     
     # 保存当前时间步的所有特征图
     def save_style_kv_callback(self, time):
-        self.save(self.unet_model.output_blocks , time, "output_block")
+        self.save_style_kv(self.unet_model.output_blocks , time, "output_block")
 
     # 保存单个时间步的callback 用于encode_ddim中
     def content_q_update_callback(self, pred_x0, xt, time):

@@ -29,6 +29,7 @@ import pickle
     --wsi /data2/ranxiangyu/vstain/wsi \
     --sty /data2/ranxiangyu/vstain/sty \
     --out /data2/ranxiangyu/vstain \
+    --out_h5 /data2/ranxiangyu/vstain/h5 \
     --stride 32 \
     --batch_size 1
 
