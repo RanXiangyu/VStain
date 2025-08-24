@@ -14,7 +14,7 @@ class FeatureHook:
 
     # 保存单个时间步的 q//k/v 特征图
     def save_feature_map(self, feature_map, filename, time):
-        print(f"到达save_feature_map中的callback函数")
+        # print(f"到达save_feature_map中的callback函数")
         
         cur_idx = self.idx_time_dict[time]
         self.feat_maps[cur_idx][f"{filename}"] = feature_map
@@ -39,7 +39,7 @@ class FeatureHook:
     
     def save_q_only(self, blocks, time, feature_type="output_block"):
         """遍历U-Net的Blocks，只提取并保存q特征。"""
-        print(f"    -> Inside callback: Extracting Q-features at time {time}...")
+        # print(f"    -> Inside callback: Extracting Q-features at time {time}...")
         for block_idx, block in enumerate(blocks):
             if len(block) > 1 and "SpatialTransformer" in str(type(block[1])):
                 # 假设 self_attn_output_block_indices 是一个包含目标层索引的列表
@@ -55,12 +55,14 @@ class FeatureHook:
     # 保存单个时间步的callback 用于encode_ddim中
     def content_q_update_callback(self, pred_x0, xt, time):
         self.save_q_only(self.unet_model.output_blocks, time, "output_block")
+        print(f"到达content_q_update_callback中的callback函数")
+
 
     def ddim_sampler_callback(self, pred_x0, xt, time):
         print(f"到达ddim_sampler_callback中的callback函数")
         self.save_style_kv_callback(time) # [B, num_heads, N, head_dim]
         self.save_feature_map(xt, 'z_enc', time) # [B, C, H, W]（latent）保存图像本身在潜空间的内容，可以可视化图像的演化过程
-        # ==================== 添加的调试代码开始 ====================
+        """==================== 添加的调试代码开始 ====================
         # 将 feat_maps 的详细信息保存到 feat_maps_debug.txt 文件中
         with open("feat_maps_debug.txt", "w", encoding="utf-8") as f:
             f.write("--- Feat Maps Debug Info ---\n\n")
@@ -78,5 +80,5 @@ class FeatureHook:
             f.write("\n--- Full content of feat_maps ---\n")
             f.write(str(self.feat_maps))
 
-        print("[调试信息] feat_maps 的内容已保存到 feat_maps_debug.txt 文件中，请查看。")
+        print("[调试信息] feat_maps 的内容已保存到 feat_maps_debug.txt 文件中，请查看。") """
         

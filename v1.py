@@ -184,9 +184,9 @@ def extract_style_features(
     print(f"End Step Timestep: {time_idx_dict[ddim_inversion_steps - 1 - start_step]}")
 
     img_feature = copy.deepcopy(feat_maps)
-     # ==================== 添加的调试代码开始 ====================
+    """ ==================== 添加的调试代码开始 ====================
     # 将 feat_maps 的详细信息保存到 feat_maps_debug.txt 文件中
-    with open("feat_maps_debug.txt", "w", encoding="utf-8") as f:
+    with open("feat_maps_debug_v1.txt", "w", encoding="utf-8") as f:
         f.write("--- Feat Maps Debug Info ---\n\n")
         f.write(f"Length of feat_maps: {len(feat_maps)}\n")
         f.write(f"Type of feat_maps: {type(feat_maps)}\n\n")
@@ -202,8 +202,8 @@ def extract_style_features(
         f.write("\n--- Full content of feat_maps ---\n")
         f.write(str(feat_maps))
 
-    print("[调试信息] feat_maps 的内容已保存到 feat_maps_debug.txt 文件中，请查看。")
-    # ==================== 添加的调试代码结束 ====================
+    print("[调试信息] feat_maps 的内容已保存到 feat_maps_debug_v1.txt 文件中，请查看。")
+    # ==================== 添加的调试代码结束 ==================== """
 
     # img_z_enc = feat_maps[0]['z_enc']
     img_z_enc = img_feature[0]['z_enc']
@@ -434,35 +434,38 @@ def main():
 
         # 循环遍历coords_list，处理背景 不应该是coord_list
         for coord in tqdm(views, desc="Building Original z0", unit="patch"):
+            print(f"开始处理背景")
             x_pixel, y_pixel = coord
             x_latent, y_latent = x_pixel // 8, y_pixel // 8
 
             region_img = slide.read_region((x_pixel, y_pixel), 0, (patch_size, patch_size)).convert("RGB")
-            region_tensor = preprocess_region(region_img)
+            region_tensor = preprocess_region(region_img).to(device)  # 转换为张量并移动到设备上
 
             # 只进行VAE编码，不加噪
             z_0_patch = model.get_first_stage_encoding(model.encode_first_stage(region_tensor))
         
             original_z0[:, :, y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent] += z_0_patch
+            print(f"处理背景完成，当前坐标: {coord}, 原始z0形状: {original_z0.shape}")
 
         # original_z0 = torch.where(count_for_z0 > 0, original_z0 / count_for_z0, original_z0)
         # 至此，original_z0 准备完毕，它包含了精确的原始H&E背景latent
 
         # 初始latent的获取过程，ddim reverse
+        print(f"开始获取初始latent")
         for coord in tqdm(coords_list, desc="Encoding patches", unit="patch"):
             x_pixel, y_pixel = coord
             x_latent = x_pixel // 8
             y_latent = y_pixel // 8
 
             region_img = slide.read_region((x_pixel, y_pixel), 0, (patch_size, patch_size)).convert("RGB")
-            region_tensor = preprocess_region(region_img)
+            region_tensor = preprocess_region(region_img).to(device)  # 转换为张量并移动到设备上
             z_0_patch = model.get_first_stage_encoding(model.encode_first_stage(region_tensor))  # shape: [1, C, h//8, w//8]
             # encode_ddim是一个“加噪”的过程，实现的
             z_T_patch, _ = sampler.encode_ddim(
                     z_0_patch.clone(),
                     num_steps=ddim_inversion_steps,
                     unconditional_conditioning=uc,
-                    end_step=time_idx_dict[ddim_inversion_steps - 1 - start_step]
+                    end_step=time_idx_dict[ddim_inversion_steps - 1 - opt.start_step]
                 )
 
             latent[:, :, y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent] += z_T_patch
@@ -471,12 +474,15 @@ def main():
 
         latent = torch.where(count > 0, latent / count, latent)  # 避免除以0
 
+        print(f"初始latent获取完成")
+
 
         iterator = tqdm(time_range, desc='DDIM Sampler', total=ddim_inversion_steps)
 
 
         # 开启循环 遍历50步DDIM去噪
-        for i,  step in enumerate(iterator):                
+        for i,  step in enumerate(iterator):    
+            print(f"开始第 {i+1} 步去噪，当前时间步: {step}")            
             count.zero_()
             value.zero_()
 
@@ -494,7 +500,7 @@ def main():
                 # 进行处理 在这一步为了简化，直接尝试采用每一步提取qkv
                 # 1. 提取当前内容图的patch
                 region_img = slide.read_region((x_pixel, y_pixel), 0, (patch_size, patch_size)).convert("RGB")
-                region_tensor = preprocess_region(region_img)
+                region_tensor = preprocess_region(region_img).to(device)  # 转换为张量并移动到设备上
                 # a. VAE编码
                 z_0_patch = model.get_first_stage_encoding(model.encode_first_stage(region_tensor))  # shape: [1, C, h//8, w//8]
                 # b. DDIM Inversion 捕获特征
@@ -526,7 +532,8 @@ def main():
 
             # 融合所有patches -- new latent
             latent = torch.where(count > 0, value / count, value)
-
+            print(f"第 {i+1} 步去噪完成，当前时间步: {step}")
+        print(f"所有去噪步骤完成")
         
         # 循环结束之后，解码 latent 空间
         # a. 白色背景latent向量填充blank为false的部分
