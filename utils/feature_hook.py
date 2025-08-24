@@ -14,12 +14,15 @@ class FeatureHook:
 
     # 保存单个时间步的 q//k/v 特征图
     def save_feature_map(self, feature_map, filename, time):
+        print(f"到达save_feature_map中的callback函数")
+        
         cur_idx = self.idx_time_dict[time]
         self.feat_maps[cur_idx][f"{filename}"] = feature_map
         # 调用save_feature_map时，是对于全局变量feat_maps进行更新操作
 
     # 保存当前时间步的所有 q//k/v 特征图
     def save_style_kv(self, blocks, time, feature_type="output_block"):
+        print(f"到达save_style_kv中的callback函数")
         block_idx = 0
         # stable diffusion的上采样 output_blocks有12个，在命令行输入的时候确定了再那几个图层进行保存qkv
         for block_idx, block in enumerate(blocks):
@@ -54,6 +57,26 @@ class FeatureHook:
         self.save_q_only(self.unet_model.output_blocks, time, "output_block")
 
     def ddim_sampler_callback(self, pred_x0, xt, time):
+        print(f"到达ddim_sampler_callback中的callback函数")
         self.save_style_kv_callback(time) # [B, num_heads, N, head_dim]
         self.save_feature_map(xt, 'z_enc', time) # [B, C, H, W]（latent）保存图像本身在潜空间的内容，可以可视化图像的演化过程
+        # ==================== 添加的调试代码开始 ====================
+        # 将 feat_maps 的详细信息保存到 feat_maps_debug.txt 文件中
+        with open("feat_maps_debug.txt", "w", encoding="utf-8") as f:
+            f.write("--- Feat Maps Debug Info ---\n\n")
+            f.write(f"Length of feat_maps: {len(self.feat_maps)}\n")
+            f.write(f"Type of feat_maps: {type(self.feat_maps)}\n\n")
+
+            if len(self.feat_maps) > 0:
+                f.write(f"--- Details of the first element ---\n")
+                f.write(f"Type of first element: {type(self.feat_maps[0])}\n")
+                if isinstance(self.feat_maps[0], dict):
+                    f.write(f"Keys in first element: {list(self.feat_maps[0].keys())}\n")
+            else:
+                f.write("The feat_maps list is EMPTY.\n")
+            
+            f.write("\n--- Full content of feat_maps ---\n")
+            f.write(str(self.feat_maps))
+
+        print("[调试信息] feat_maps 的内容已保存到 feat_maps_debug.txt 文件中，请查看。")
         

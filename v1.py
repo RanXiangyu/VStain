@@ -23,6 +23,7 @@ from ldm.models.diffusion.ddim import DDIMSampler
 # from create_patches_fp import WSIPatchExtractor
 from patches_utils.create_patches_fp import WSIPatchExtractor
 
+feat_maps = []
 
 def load_model_from_config(config_path, ckpt_path, device="cuda", verbose=False):
     # verbose是否打印缺失/多余的 key
@@ -151,12 +152,13 @@ def extract_style_features(
     ):
 
     global feat_maps
-    feat_maps = []
+    # feat_maps = []
     
     img_feature = None
     img_z_enc = None
     
     img_path = os.path.join(img_dir, img_name)
+    print(f"[INFO] 进行DDIM反演，获取特征图: {img_path}")
     init_img = preprocess_img(img_path).to('cuda')
     img_feat_name = os.path.join(feature_dir, os.path.basename(img_name).split('.')[0] + '_sty.pkl')
 
@@ -182,6 +184,27 @@ def extract_style_features(
     print(f"End Step Timestep: {time_idx_dict[ddim_inversion_steps - 1 - start_step]}")
 
     img_feature = copy.deepcopy(feat_maps)
+     # ==================== 添加的调试代码开始 ====================
+    # 将 feat_maps 的详细信息保存到 feat_maps_debug.txt 文件中
+    with open("feat_maps_debug.txt", "w", encoding="utf-8") as f:
+        f.write("--- Feat Maps Debug Info ---\n\n")
+        f.write(f"Length of feat_maps: {len(feat_maps)}\n")
+        f.write(f"Type of feat_maps: {type(feat_maps)}\n\n")
+
+        if len(feat_maps) > 0:
+            f.write(f"--- Details of the first element ---\n")
+            f.write(f"Type of first element: {type(feat_maps[0])}\n")
+            if isinstance(feat_maps[0], dict):
+                f.write(f"Keys in first element: {list(feat_maps[0].keys())}\n")
+        else:
+            f.write("The feat_maps list is EMPTY.\n")
+        
+        f.write("\n--- Full content of feat_maps ---\n")
+        f.write(str(feat_maps))
+
+    print("[调试信息] feat_maps 的内容已保存到 feat_maps_debug.txt 文件中，请查看。")
+    # ==================== 添加的调试代码结束 ====================
+
     # img_z_enc = feat_maps[0]['z_enc']
     img_z_enc = img_feature[0]['z_enc']
 
@@ -281,6 +304,14 @@ def wsi_decode(
         if verbose:
             pbar.close()
 
+         # 处理除以零的情况
+        overlap_count[overlap_count == 0] = 1
+        output_image /= overlap_count
+
+        # 转换回 uint8 图像格式
+        output_image = (output_image + 1.0) / 2.0 # 从 [-1, 1] 转换到 [0, 1]
+        output_image = (output_image.clip(0, 1) * 255).astype(np.uint8)
+
 
     return output_image
                 
@@ -331,7 +362,7 @@ def main():
     sampler.make_schedule(ddim_num_steps=ddim_steps, ddim_eta=opt.ddim_eta, verbose=False) # ddim_steps就是循环采样的步数
     # 在这个地方schedule之后，sampler.ddim_timesteps 就是采样的时间步已经确定了
 
-    save_feature_timesteps = sampler.ddim_timesteps
+    save_feature_timesteps = ddim_steps
 
     # 获取ddim的时间步和索引映射 并反转 
     time_range = np.flip(sampler.ddim_timesteps)
@@ -441,7 +472,8 @@ def main():
         latent = torch.where(count > 0, latent / count, latent)  # 避免除以0
 
 
-        iterator = tqdm(time_range, desc='DDIM Sampler', total=total_steps)
+        iterator = tqdm(time_range, desc='DDIM Sampler', total=ddim_inversion_steps)
+
 
         # 开启循环 遍历50步DDIM去噪
         for i,  step in enumerate(iterator):                
@@ -467,7 +499,7 @@ def main():
                 z_0_patch = model.get_first_stage_encoding(model.encode_first_stage(region_tensor))  # shape: [1, C, h//8, w//8]
                 # b. DDIM Inversion 捕获特征
                 # _ = feature_extractor(purpose='content', model=model, sampler=sampler, uc=uc, time_idx_dict=time_idx_dict, ddim_sampler_callback=ddim_sampler_callback, direct_latent_input=z_0_patch, target_step_num=i)
-                target_timestep_t = time_idx_dict[target_step_index]
+                target_timestep_t = time_idx_dict[i]
                 _, _ = sampler.encode_ddim(z_0_patch.clone(), num_steps=ddim_inversion_steps,
                                             unconditional_conditioning=uc,
                                             end_step=target_step_num,
@@ -505,7 +537,7 @@ def main():
         )
 
         print("Starting final tiled decoding...")
-        final_wsi_np = tiled_decode(
+        final_wsi_np = wsi_decode(
             latent_tensor=final_combined_latent,
             model=model,
             patch_size=128,  # 在latent空间，对应1024x1024像素，可根据显存调整

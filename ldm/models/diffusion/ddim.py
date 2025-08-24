@@ -330,9 +330,11 @@ class DDIMSampler(object):
             # i, t = 0 1000; 1 980; 2 960 ... 49 20
             if i > end_step:
                 break
+            # print(f"DDIM Inversion step {i + 1}/{num_steps} at t={t}")
             img, pred_x0 = self.reverse_ddim(img, t, t_next=steps[i+1] ,c=conditioning, unconditional_conditioning=unconditional_conditioning, unconditional_guidance_scale=unconditional_guidance_scale)
             if t in callback_ddim_timesteps_list:
                 if img_callback: img_callback(pred_x0, img, t)
+                print(f"到达encode_ddim中的callback函数")
 
         return img, pred_x0
 
