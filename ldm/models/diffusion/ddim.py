@@ -308,8 +308,9 @@ class DDIMSampler(object):
     @torch.no_grad()
     def encode_ddim(self, img, num_steps, conditioning=None, unconditional_conditioning=None ,unconditional_guidance_scale=1., \
                     end_step=999, callback_ddim_timesteps=None, img_callback=None):
-        # callback_ddim_timesteps 是[980 - 0]这样的一个倒叙的列表
-        print(f"Running DDIM inversion with {num_steps} timesteps")
+        # callback_ddim_timesteps 设置方式是传入一个整数，代表你希望在整个反演过程中，回调函数被触发的总次数。程序会根据这个数字，在整个时间步序列中均匀地选取 N 个时间点来执行回调。
+        """Attention 8.25删除print"""
+        # print(f"Running DDIM inversion with {num_steps} timesteps")
         if num_steps == 999:
             T = 999
             c = T // num_steps
@@ -320,7 +321,9 @@ class DDIMSampler(object):
             T = self.ddpm_num_timesteps
             c = T // num_steps
             time_steps= range(1, T, c)
-            iterator = tqdm(time_steps, desc='DDIM Inversion',total=num_steps)
+            """Attention 8.25删除显示进度条"""
+            # iterator = tqdm(time_steps, desc='DDIM Inversion',total=num_steps)
+            iterator = time_steps
             steps = list(range(1,T + c,c))
             steps[-1] = 999
 

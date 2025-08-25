@@ -22,7 +22,7 @@ class FeatureHook:
 
     # 保存当前时间步的所有 q//k/v 特征图
     def save_style_kv(self, blocks, time, feature_type="output_block"):
-        print(f"到达save_style_kv中的callback函数")
+        # print(f"到达save_style_kv中的callback函数")
         block_idx = 0
         # stable diffusion的上采样 output_blocks有12个，在命令行输入的时候确定了再那几个图层进行保存qkv
         for block_idx, block in enumerate(blocks):
@@ -55,11 +55,11 @@ class FeatureHook:
     # 保存单个时间步的callback 用于encode_ddim中
     def content_q_update_callback(self, pred_x0, xt, time):
         self.save_q_only(self.unet_model.output_blocks, time, "output_block")
-        print(f"到达content_q_update_callback中的callback函数")
+        # print(f"到达content_q_update_callback中的callback函数")
 
 
     def ddim_sampler_callback(self, pred_x0, xt, time):
-        print(f"到达ddim_sampler_callback中的callback函数")
+        # print(f"到达ddim_sampler_callback中的callback函数")
         self.save_style_kv_callback(time) # [B, num_heads, N, head_dim]
         self.save_feature_map(xt, 'z_enc', time) # [B, C, H, W]（latent）保存图像本身在潜空间的内容，可以可视化图像的演化过程
         """==================== 添加的调试代码开始 ====================

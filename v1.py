@@ -118,7 +118,7 @@ def get_opt():
 def preprocess_img(path):
     image = Image.open(path).convert('RGB')
     x, y = image.size
-    print(f"从 {path} 加载图片大小为 ({x}, {y}) ")
+    # print(f"从 {path} 加载图片大小为 ({x}, {y}) ")
     h = w = 512
     image = transforms.CenterCrop(min(x,y))(image) # (x, y)
     image = image.resize((w, h), resample=Image.Resampling.LANCZOS)
@@ -430,7 +430,9 @@ def main():
         latent = torch.zeros((1, opt.C_latent, H // 8, W // 8), device=device)
         count = torch.zeros_like(latent)
         value = torch.zeros_like(latent)
-        blank = torch.zeros_like(latent) # 记录有哪些部分没有被去噪，clam已经去掉的部分
+        # blank = torch.zeros_like(latent) # 记录有哪些部分没有被去噪，clam已经去掉的部分
+        # v1.py, main() 函数中
+        blank = torch.zeros_like(latent, dtype=torch.bool)
         
         # 构建并保存原始图像的latent —— 用于融合
         original_z0 = torch.zeros_like(latent)
@@ -449,7 +451,7 @@ def main():
             z_0_patch = model.get_first_stage_encoding(model.encode_first_stage(region_tensor))
         
             original_z0[:, :, y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent] += z_0_patch
-            print(f"处理背景完成，当前坐标: {coord}, 原始z0形状: {original_z0.shape}")
+            # print(f"处理背景完成，当前坐标: {coord}, 原始z0形状: {original_z0.shape}")
 
         # original_z0 = torch.where(count_for_z0 > 0, original_z0 / count_for_z0, original_z0)
         # 至此，original_z0 准备完毕，它包含了精确的原始H&E背景latent
@@ -513,7 +515,7 @@ def main():
                 _, _ = sampler.encode_ddim(z_0_patch.clone(), 
                                             num_steps=ddim_inversion_steps,
                                             unconditional_conditioning=uc,
-                                            end_step=target_timestep_t,
+                                            end_step=i,
                                             # callback_ddim_timesteps=i,
                                             img_callback=cnt_ddim_sampler_callback)
                 # 此处callback_ddim_timesteps不能为0，解决： 不传入callback_ddim_timesteps，则 encode__ddim() 会在每个时间步（np.flip(self.ddim_timesteps)）都调用 img_callback
