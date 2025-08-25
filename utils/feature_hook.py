@@ -43,7 +43,7 @@ class FeatureHook:
         for block_idx, block in enumerate(blocks):
             if len(block) > 1 and "SpatialTransformer" in str(type(block[1])):
                 # 假设 self_attn_output_block_indices 是一个包含目标层索引的列表
-                if block_idx in self.self_attn_output_block_indices:
+                if block_idx in self.attn_layer_idics:
                     q = block[1].transformer_blocks[0].attn1.q
                     # 只保存 q 特征
                     self.save_feature_map(q, f"{feature_type}_{block_idx}_self_attn_q", time)

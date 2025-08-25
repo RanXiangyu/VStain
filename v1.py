@@ -102,7 +102,9 @@ def get_opt():
     parser.add_argument('--ddim_eta', type=float, default=0.0, help='DDIM eta')
     parser.add_argument('--C_latent', type=int, default=4, help='latent channels')
     # 代码运行设置
-    parser.add_argument('--gpu', type=int, default=0, help='GPU ID to use')
+    # parser.add_argument('--gpu', type=int, default=0, help='GPU ID to use')
+    # 在 get_opt() 函数中
+    parser.add_argument('--gpu', type=str, default='0', help='GPU IDs to use (e.g., "0" or "0,1")')
     # 模块设置
     parser.add_argument("--without_init_adain", action='store_true')
     parser.add_argument("--without_attn_injection", action='store_true')
@@ -322,6 +324,7 @@ def main():
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
+
     if opt.is_patch:
         wsi_extractor = WSIPatchExtractor()
 
@@ -397,6 +400,7 @@ def main():
         unet_model=unet
     )
     sty_ddim_sampler_callback = feature_hook.ddim_sampler_callback
+    cnt_ddim_sampler_callback = feature_hook.content_q_update_callback
 
     # 获取h5文件和wsi文件
     h5_files = get_sorted_h5_files(opt.out_h5)
@@ -506,12 +510,25 @@ def main():
                 # b. DDIM Inversion 捕获特征
                 # _ = feature_extractor(purpose='content', model=model, sampler=sampler, uc=uc, time_idx_dict=time_idx_dict, ddim_sampler_callback=ddim_sampler_callback, direct_latent_input=z_0_patch, target_step_num=i)
                 target_timestep_t = time_idx_dict[i]
-                _, _ = sampler.encode_ddim(z_0_patch.clone(), num_steps=ddim_inversion_steps,
+                _, _ = sampler.encode_ddim(z_0_patch.clone(), 
+                                            num_steps=ddim_inversion_steps,
                                             unconditional_conditioning=uc,
-                                            end_step=target_step_num,
-                                            callback_ddim_timesteps=[target_timestep_t],
-                                            img_callback=FeatureHook.content_q_update_callback)
-                
+                                            end_step=target_timestep_t,
+                                            # callback_ddim_timesteps=i,
+                                            img_callback=cnt_ddim_sampler_callback)
+                # 此处callback_ddim_timesteps不能为0，解决： 不传入callback_ddim_timesteps，则 encode__ddim() 会在每个时间步（np.flip(self.ddim_timesteps)）都调用 img_callback
+                # z_T_patch, _ = sampler.encode_ddim(
+                #     z_0_patch.clone(),
+                #     num_steps=ddim_inversion_steps,
+                #     unconditional_conditioning=uc,
+                #     end_step=time_idx_dict[ddim_inversion_steps - 1 - opt.start_step]
+                # )
+                # img_z_enc, _ = sampler.encode_ddim(init_img.clone(), 
+                #                         num_steps = ddim_inversion_steps, \
+                #                         unconditional_conditioning = uc, \
+                #                         end_step = time_idx_dict[ddim_inversion_steps - 1 - start_step], \
+                #                         callback_ddim_timesteps = save_feature_timesteps, \
+                #                         img_callback = ddim_sampler_callback)
                 injected_features_i = feat_maps[i] 
 
 
