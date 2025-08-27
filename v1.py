@@ -22,7 +22,7 @@ from ldm.util import instantiate_from_config
 from ldm.models.diffusion.ddim import DDIMSampler
 
 # from create_patches_fp import WSIPatchExtractor
-from patches_utils.create_patches_fp import WSIPatchExtractor
+from wsi_core.create_patches_fp import WSIPatchExtractor
 
 feat_maps = []
 

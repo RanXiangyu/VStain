@@ -32,10 +32,9 @@ import pickle
     --out_h5 /data2/ranxiangyu/vstain/h5 \
     --stride 256 \
     --batch_size 8 \
-    --ddim_inv_steps 20 \
-    --save_feat_steps 20 \
-    --start_step 19 \
-    --is_patch
+    --ddim_inv_steps 5 \
+    --save_feat_steps 5 \
+    --start_step 4 
 
 '''
 
