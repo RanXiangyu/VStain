@@ -53,8 +53,7 @@ def load_model_from_config(config_path, ckpt_path, device="cuda", verbose=False)
     model.eval()
     return model
 
-# wsi划分
-# 将全景图划分为多个重叠的小窗口，全景图的高度，全景图的宽度，每个处理窗口的大小，相邻窗口的步长
+# wsi划分  用于背景处理
 def get_views(panorama_height, panorama_width, window_size=64, stride=8):
     # 潜在空间为 1/8
     panorama_height /= 8
@@ -64,15 +63,11 @@ def get_views(panorama_height, panorama_width, window_size=64, stride=8):
     num_blocks_width = (panorama_width - window_size) // stride + 1
     total_num_blocks = int(num_blocks_height * num_blocks_width)
 
-    # 生成窗口坐标
-    # 逻辑是从左到右从上到下
+    # 生成窗口坐标，逻辑是从左到右从上到下
     views = []
     for i in range(total_num_blocks): # i ： 0 - n-1
-        # h_end = h_start + window_size
         w_start = int((i % num_blocks_width) * stride)
         h_start = int((i // num_blocks_width) * stride)
-        # w_end = w_start + window_size
-        # views.append((h_start, h_end, w_start, w_end))
         views.append((w_start, h_start))  # 只需要左上角坐标
     return views
 
@@ -188,26 +183,6 @@ def extract_style_features(
     print(f"End Step Timestep: {time_idx_dict[ddim_inversion_steps - 1 - start_step]}")
 
     img_feature = copy.deepcopy(feat_maps)
-    """ ==================== 添加的调试代码开始 ====================
-    # 将 feat_maps 的详细信息保存到 feat_maps_debug.txt 文件中
-    with open("feat_maps_debug_v1.txt", "w", encoding="utf-8") as f:
-        f.write("--- Feat Maps Debug Info ---\n\n")
-        f.write(f"Length of feat_maps: {len(feat_maps)}\n")
-        f.write(f"Type of feat_maps: {type(feat_maps)}\n\n")
-
-        if len(feat_maps) > 0:
-            f.write(f"--- Details of the first element ---\n")
-            f.write(f"Type of first element: {type(feat_maps[0])}\n")
-            if isinstance(feat_maps[0], dict):
-                f.write(f"Keys in first element: {list(feat_maps[0].keys())}\n")
-        else:
-            f.write("The feat_maps list is EMPTY.\n")
-        
-        f.write("\n--- Full content of feat_maps ---\n")
-        f.write(str(feat_maps))
-
-    print("[调试信息] feat_maps 的内容已保存到 feat_maps_debug_v1.txt 文件中，请查看。")
-    # ==================== 添加的调试代码结束 ==================== """
 
     # img_z_enc = feat_maps[0]['z_enc']
     img_z_enc = img_feature[0]['z_enc']
@@ -332,9 +307,6 @@ def wsi_decode(
         # 在CPU内存中创建最终输出图像画布
         output_image = np.zeros((H_pixel, W_pixel, 3), dtype=np.uint8)
 
-        # 【性能优化】删除 .to("cpu")，让大的latent_tensor保留在GPU上直接进行切片，效率更高
-        # latent_tensor = latent_tensor.to("cpu") 
-
         y_steps = range(0, H_latent, stride)
         x_steps = range(0, W_latent, stride)
 
@@ -353,7 +325,6 @@ def wsi_decode(
 
                 decoded_patch_cpu = decoded_patch_gpu.squeeze(0).permute(1, 2, 0)
 
-                # 【Bug 1 已修复】正确的颜色值转换流程
                 # 1. 先将 [-1, 1] 范围映射到 [0, 1]
                 decoded_patch_cpu = (decoded_patch_cpu + 1.0) / 2.0
                 # 2. 再将 [0, 1] 范围映射到 [0, 255] 并转换类型
@@ -366,7 +337,6 @@ def wsi_decode(
                 w_paste_size = stride * downsample_factor
 
                 h_paste_size = min(h_paste_size, H_pixel - y_pixel_start)
-                # 【语法错误已修复】确保此行代码完整
                 w_paste_size = min(w_paste_size, W_pixel - x_pixel_start)
 
                 output_image[
@@ -384,8 +354,6 @@ def wsi_decode(
         
         if verbose:
             pbar.close()
-
-        # 【Bug 2 已修复】删除了所有无效的后处理代码（如 overlap_count 和重复的颜色转换）
 
     return output_image
 
@@ -482,7 +450,7 @@ def main():
 
     # 风格图片特征提取
     sty_img_list = sorted(os.listdir(opt.sty))  # 获取风格图片列表 
-    # sty_feature, sty_z_enc = feature_extractor(opt.sty, sty_img, feature_dir, model, sampler, ddim_inversion_steps, uc, time_idx_dict, opt.start_step, save_feature_timesteps, ddim_sampler_callback, save_feat=True)
+
     
     for sty_img in sty_img_list:
         sty_feat, sty_z_enc = extract_style_features(img_dir=opt.sty, img_name=sty_img, feature_dir=feature_dir,save_feat=True,start_step=opt.start_step, model=model, sampler=sampler, uc=uc, time_idx_dict=time_idx_dict, ddim_sampler_callback=sty_ddim_sampler_callback, ddim_inversion_steps=ddim_inversion_steps, save_feature_timesteps=save_feature_timesteps)
@@ -524,8 +492,6 @@ def main():
             original_z0[:, :, y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent] += z_0_patch
             # print(f"处理背景完成，当前坐标: {coord}, 原始z0形状: {original_z0.shape}")
 
-        # original_z0 = torch.where(count_for_z0 > 0, original_z0 / count_for_z0, original_z0)
-        # 至此，original_z0 准备完毕，它包含了精确的原始H&E背景latent
 
         # 初始latent的获取过程，ddim reverse
         print(f"开始获取初始latent")
@@ -581,8 +547,6 @@ def main():
                 # a. VAE编码
                 z_0_patch = model.get_first_stage_encoding(model.encode_first_stage(region_tensor))  # shape: [1, C, h//8, w//8]
                 # b. DDIM Inversion 捕获特征
-                # _ = feature_extractor(purpose='content', model=model, sampler=sampler, uc=uc, time_idx_dict=time_idx_dict, ddim_sampler_callback=ddim_sampler_callback, direct_latent_input=z_0_patch, target_step_num=i)
-                target_timestep_t = time_idx_dict[i]
                 _, _ = sampler.encode_ddim(z_0_patch.clone(), 
                                             num_steps=ddim_inversion_steps,
                                             unconditional_conditioning=uc,
@@ -590,18 +554,7 @@ def main():
                                             # callback_ddim_timesteps=i,
                                             img_callback=cnt_ddim_sampler_callback)
                 # 此处callback_ddim_timesteps不能为0，解决： 不传入callback_ddim_timesteps，则 encode__ddim() 会在每个时间步（np.flip(self.ddim_timesteps)）都调用 img_callback
-                # z_T_patch, _ = sampler.encode_ddim(
-                #     z_0_patch.clone(),
-                #     num_steps=ddim_inversion_steps,
-                #     unconditional_conditioning=uc,
-                #     end_step=time_idx_dict[ddim_inversion_steps - 1 - opt.start_step]
-                # )
-                # img_z_enc, _ = sampler.encode_ddim(init_img.clone(), 
-                #                         num_steps = ddim_inversion_steps, \
-                #                         unconditional_conditioning = uc, \
-                #                         end_step = time_idx_dict[ddim_inversion_steps - 1 - start_step], \
-                #                         callback_ddim_timesteps = save_feature_timesteps, \
-                #                         img_callback = ddim_sampler_callback)
+                
                 injected_features_i = feat_maps[i] 
 
 
@@ -643,108 +596,13 @@ def main():
         )
         
         # 不够大，保存图片超过了4gb
-        # final_wsi_img = Image.fromarray(final_wsi_np) 
-        # final_wsi_img.save(os.path.join(opt.out, f"final_decoded_{idx}.tiff"))
         print("使用 tifffile 保存为 BigTIFF 格式...")
         output_path = os.path.join(opt.out, f"final_decoded_{idx}_{opt.ddim_inv_steps}.tiff")
         # 使用 bigtiff=True 来确保支持大于4GB的文件
         tifffile.imwrite(output_path, final_wsi_np, bigtiff=True)
         print(f"图像已成功保存到: {output_path}")
 
-        print("正在保存PNG预览图...")
-        # 计算缩小后的尺寸，例如，宽度为2048像素，高度按比例缩放
-        preview_width = 4096
-        width, height = final_wsi_img.size
-        preview_height = int(height * (preview_width / width))
-        preview_img = final_wsi_img.resize((preview_width, preview_height), Image.Resampling.LANCZOS)
-        preview_img.save(os.path.join(opt.out, f"final_decoded_{idx}_preview.png"))
-        print("PNG预览图保存完成。")
-
 
 if __name__ == "__main__":
     main()
 
-
-"""
-# 特征提取 在特定的时间步 save_feature_timesteps
-def feature_extractor(
-    # --- 通用参数 ---
-    purpose='style', # 模式 ('style' 或 'content')
-    model, 
-    sampler, 
-    uc,
-    time_idx_dict, 
-    save_feature_timesteps,
-    ddim_sampler_callback=None,
-    ddim_inversion_steps=50, 
-    # --- style参数 ---
-    img_dir,
-    img_name, 
-    feature_dir, 
-    start_step=49, 
-    save_feat=False
-    # --- content参数 ---
-    direct_latent_input: torch.Tensor = None, # 直接接收content
-    target_step_num=None,    # 👈 指定单个时间步（如30），默认为None不提取
-    ):
-
-    global feat_maps
-    feat_maps = []
-    
-    img_feature = None
-    img_z_enc = None
-    feature = None # 指定时间步的特征
-
-    if purpose == 'content':
-        if direct_latent_input is None:
-            raise ValueError("For 'content' purpose, provide the latent tensor via 'direct_latent_input'.")
-        if target_step_num is None:
-            raise ValueError("For 'content' purpose, specify the step number via 'target_step_num'.")
-        if not (1 <= target_step_num <= ddim_inversion_steps):
-            raise ValueError(f"'target_step_num' must be between 1 and {ddim_inversion_steps}.")
-
-        # 1. 计算循环 i和 确切的时间步
-        target_timestep_t = time_idx_dict[target_step_index] # 实际时间步 t
-
-        # 2. 执行DDIM反演
-        _, _ = sampler.encode_ddim(direct_latent_input.clone(), num_steps=ddim_inversion_steps,
-                                            unconditional_conditioning=uc,
-                                            end_step=target_step_num,
-                                            callback_ddim_timesteps=[target_timestep_t],
-                                            img_callback=ddim_sampler_callback)
-        
-        return None    
-    
-    elif purpose == 'style':
-        img_path = os.path.join(img_dir, img_name)
-        init_img = preprocess_img(img_path).to('cuda')
-        img_feat_name = os.path.join(feature_dir, os.path.basename(img_name).split('.')[0] + '_sty.pkl')
-
-        # 1. 直接加载特征返回 style图片
-        if os.path.exists(img_feat_name):
-            print(f"[✓] Loading style feature from {img_feat_name}")
-            with open(img_feat_name, 'rb') as f:
-                img_feature = pickle.load(f)
-                img_z_enc = torch.clone(img_feature[0]['z_enc'])
-            return img_feature, z_enc_startstep
-
-        # 2. 进行ddim反演，获取特征图
-        init_img = model.get_first_stage_encoding(model.encode_first_stage(init_img))  # [1, 4, 64, 64] z_0
-        img_z_enc, _ = sampler.encode_ddim(init_img.clone(), num_steps = ddim_inversion_steps, \
-                                            unconditional_conditioning = uc, \
-                                            end_step = time_idx_dict[ddim_inversion_steps - 1 - start_step], \
-                                            callback_ddim_timesteps = save_feature_timesteps, \
-                                            img_callback = ddim_sampler_callback)
-        
-        img_feature = copy.deepcopy(feat_maps)
-        # img_z_enc = feat_maps[0]['z_enc']
-        img_z_enc = img_feature[0]['z_enc']
-
-
-        if save_feat and len(feature_dir) > 0:
-            print(f"Saving style feature to {img_feat_name}")
-            with open(img_feat_name, 'wb') as f:
-                pickle.dump(img_feature, f)
-
-        return img_feature, img_z_enc
-"""
