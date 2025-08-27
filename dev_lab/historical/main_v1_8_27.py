@@ -651,14 +651,14 @@ def main():
         tifffile.imwrite(output_path, final_wsi_np, bigtiff=True)
         print(f"图像已成功保存到: {output_path}")
 
-        print("正在保存PNG预览图...")
-        # 计算缩小后的尺寸，例如，宽度为2048像素，高度按比例缩放
-        preview_width = 4096
-        width, height = final_wsi_img.size
-        preview_height = int(height * (preview_width / width))
-        preview_img = final_wsi_img.resize((preview_width, preview_height), Image.Resampling.LANCZOS)
-        preview_img.save(os.path.join(opt.out, f"final_decoded_{idx}_preview.png"))
-        print("PNG预览图保存完成。")
+        # print("正在保存PNG预览图...")
+        # # 计算缩小后的尺寸，例如，宽度为2048像素，高度按比例缩放
+        # preview_width = 4096
+        # width, height = final_wsi_img.size
+        # preview_height = int(height * (preview_width / width))
+        # preview_img = final_wsi_img.resize((preview_width, preview_height), Image.Resampling.LANCZOS)
+        # preview_img.save(os.path.join(opt.out, f"final_decoded_{idx}_preview.png"))
+        # print("PNG预览图保存完成。")
 
 
 if __name__ == "__main__":
