@@ -25,16 +25,17 @@ import pickle
     --gamma 0.75 --T 1.5
     --precomputed /data2/ranxiangyu/styleid_out/precomputed_feats \
 
-    python v1.py \
+    python main.py \
     --wsi /data2/ranxiangyu/vstain/wsi \
     --sty /data2/ranxiangyu/vstain/sty \
     --out /data2/ranxiangyu/vstain \
     --out_h5 /data2/ranxiangyu/vstain/h5 \
-    --stride 256 \
+    --stride 32 \
     --batch_size 8 \
     --ddim_inv_steps 5 \
     --save_feat_steps 5 \
-    --start_step 4 
+    --start_step 4 \
+    --is_patch \
 
 '''
 
