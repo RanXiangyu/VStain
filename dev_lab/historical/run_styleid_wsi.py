@@ -35,7 +35,7 @@ import pickle
     --ddim_inv_steps 5 \
     --save_feat_steps 5 \
     --start_step 4 \
-    --is_patch \
+    --is_patch 
 
 '''
 
