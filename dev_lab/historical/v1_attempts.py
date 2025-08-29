@@ -28,6 +28,32 @@
 
     # sty_feature, sty_z_enc = feature_extractor(opt.sty, sty_img, feature_dir, model, sampler, ddim_inversion_steps, uc, time_idx_dict, opt.start_step, save_feature_timesteps, ddim_sampler_callback, save_feat=True)
 
+
+
+def save_coords_to_txt(coords_array, output_path):
+    """
+    将一个完整的 NumPy 坐标数组（不带省略号）保存到文本文件。
+
+    Args:
+        coords_array (np.ndarray): NumPy 坐标数组。
+        output_path (str): 输出的 .txt 文件路径。
+    """
+    # 临时设置 NumPy 的打印阈值为一个超大值，意味着“永不折叠”
+    original_threshold = np.get_printoptions()['threshold']
+    np.set_printoptions(threshold=sys.maxsize)
+
+    print(f"[DEBUG] Saving FULL raw array representation to {output_path}...")
+    try:
+        with open(output_path, 'w') as f:
+            f.write(str(coords_array))
+        print(f"[DEBUG] Successfully saved {len(coords_array)} coordinates.")
+    except Exception as e:
+        print(f"[ERROR] Failed to save coordinates: {e}")
+    finally:
+        # 无论成功与否，都恢复 NumPy 的默认打印设置，避免影响程序其他部分的打印输出
+        np.set_printoptions(threshold=original_threshold)
+
+
 # 主循环
 
 # b. DDIM Inversion 捕获特征
@@ -119,3 +145,4 @@ def feature_extractor(
                 pickle.dump(img_feature, f)
 
         return img_feature, img_z_enc
+

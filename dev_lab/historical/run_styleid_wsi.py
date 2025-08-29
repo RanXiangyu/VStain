@@ -30,11 +30,11 @@ import pickle
     --sty /data2/ranxiangyu/vstain/sty \
     --out /data2/ranxiangyu/vstain \
     --out_h5 /data2/ranxiangyu/vstain/h5 \
-    --stride 32 \
+    --stride 480 \
     --batch_size 8 \
-    --ddim_inv_steps 5 \
-    --save_feat_steps 5 \
-    --start_step 4 \
+    --ddim_inv_steps 3 \
+    --save_feat_steps 2 \
+    --start_step 2 \
     --is_patch 
 
 '''

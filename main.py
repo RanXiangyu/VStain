@@ -13,6 +13,9 @@ import torchvision.transforms as transforms
 import pickle
 import copy
 import tifffile
+import sys
+from typing import List
+
 
 
 from utils.hdf5 import get_sorted_h5_files, get_sorted_wsi_files, read_h5_coords
@@ -269,52 +272,56 @@ def latent_decode(
     print("[✓] All patches decoded and composed.")
     return final_wsi_np
 
-def generate_coords_list(non_overlapping_blocks, patch_size, stride):
+def generate_overlapping_coords(coords, patch_size=512, stride=32):
     """
-    根据不重叠的组织区块列表，生成重叠的切片坐标。
+    根据CLAM生成的不重叠coords，拓展为重叠coords
+    :param coords: 原始坐标列表 (N,2)，每个元素是[x, y]
+    :param patch_size: patch大小
+    :param stride: 新的滑动步长
+    :return: 扩展后的坐标列表
+    """
+    coords = np.array(coords)
+    coord_set = set()
+
+    # 遍历每个不重叠的起点
+    for x, y in coords:
+        for xx in range(x, x + patch_size, stride):
+            for yy in range(y, y + patch_size, stride):
+                coord_set.add((xx, yy))  # 用 tuple 保证唯一性
+
+    # 转回 numpy
+    expanded_coords = np.array(list(coord_set))
+    # 按行列排序，更直观
+    expanded_coords = expanded_coords[np.lexsort((expanded_coords[:,1], expanded_coords[:,0]))]
+
+    return expanded_coords
+    return np.array(expanded_coords)
+
+
+def save_coords_to_txt(coords_array, output_path):
+    """
+    将一个完整的 NumPy 坐标数组（不带省略号）保存到文本文件。
 
     Args:
-        non_overlapping_blocks (list): 不重叠组织区块的左上角坐标 (x, y) 列表。
-        patch_size (int): 需要生成的切片大小 (e.g., 512)。
-        stride (int): 生成重叠切片时使用的步长 (e.g., 224)。
-
-    Returns:
-        list: 经过排序和去重的、重叠切片的 (x, y) 坐标列表。
-    """
-    # print(f"Generating overlapping coordinates with patch size {patch_size} and stride {stride}...")
-
-    coords_list = []
-    for block_coord in tqdm(non_overlapping_blocks, desc="Generating overlapping coords from blocks"):
-        block_x_start, block_y_start = block_coord
-        win_size = patch_size
-
-        # 经典的滑动窗口逻辑，横坐标一排一排地切
-        for y in range(block_y_start, block_y_start + win_size, stride):
-            for x in range(block_x_start, block_x_start + win_size, stride):
-                # 确保生成的patch不会超出区块边界
-                if (x + win_size <= block_x_start + win_size) and (y + win_size <= block_y_start + win_size):
-                    coords_list.append((x, y))
-
-    # 去重并排序
-    coords_list = sorted(list(set(coords_list)))
-    return coords_list
-
-def save_coords_to_txt(coords_list, output_path):
-    """
-    一个用于调试的函数，将坐标列表保存到文本文件中。
-
-    Args:
-        coords_list (list): 包含 (x, y) 坐标元组的列表。
+        coords_array (np.ndarray): NumPy 坐标数组。
         output_path (str): 输出的 .txt 文件路径。
     """
-    print(f"[DEBUG] Saving coordinates to {output_path}...")
+    # 临时设置 NumPy 的打印阈值为一个超大值，意味着“永不折叠”
+    original_threshold = np.get_printoptions()['threshold']
+    np.set_printoptions(threshold=sys.maxsize)
+
+    print(f"[DEBUG] Saving FULL raw array representation to {output_path}...")
     try:
         with open(output_path, 'w') as f:
-            for i, (x, y) in enumerate(coords_list):
-                f.write(f"Coord {i+1}: ({x}, {y})\n")
-        print(f"[DEBUG] Successfully saved {len(coords_list)} coordinates.")
+            f.write(str(coords_array))
+        print(f"[DEBUG] Successfully saved {len(coords_array)} coordinates.")
     except Exception as e:
         print(f"[ERROR] Failed to save coordinates: {e}")
+    finally:
+        # 无论成功与否，都恢复 NumPy 的默认打印设置，避免影响程序其他部分的打印输出
+        np.set_printoptions(threshold=original_threshold)
+
+
 
 def main():
     opt = get_opt()
@@ -330,7 +337,7 @@ def main():
             source=opt.wsi,
             save_dir=opt.out_h5,
             patch_size=opt.patch_size,
-            step_size=opt.patch_size,
+            step_size=480,
             patch_level=0,
             seg=True,
             patch=True,
@@ -340,19 +347,8 @@ def main():
             num_files=opt.num_files
         )
     else: # 检查作用
-        wsi_extractor.process(
-            source=opt.wsi,
-            save_dir=opt.out_h5,
-            patch_size=opt.patch_size,
-            step_size=opt.patch_size,
-            patch_level=0,
-            seg=True,
-            patch=True,
-            stitch=False,
-            save_mask=False,
-            num_files=opt.num_files
-        )
-
+        wsi_extractor.process(source=opt.wsi, save_dir=opt.out_h5, patch_size=opt.patch_size, step_size=opt.patch_size, patch_level=0, seg=True, patch=True, stitch=False, save_mask=False, num_files=opt.num_files)
+    
     # 文件夹准备
     feature_dir = os.path.join(opt.out, 'features')
     os.makedirs(feature_dir, exist_ok=True)
@@ -427,153 +423,148 @@ def main():
 
         style_basename = sty_img_list[-1]
         style_name, _ = os.path.splitext(style_basename)
-
-    # 遍历所有wsi文件
-    for idx in tqdm(enumerate(h5_files), total=len(h5_files), desc="Processing H5 files"):
-        # 读取坐标列表 打开slide
-        non_overlapping_blocks = read_h5_coords(h5_files[idx])
-        # coords_list = read_h5_coords(h5_files[idx])
-        slide = openslide.OpenSlide(wsi_files[idx])
-        W, H = slide.dimensions
         
-        stride = opt.stride
-        patch_size = opt.patch_size
-        patch_size_latent = opt.patch_size // 8 # 在潜空间当中需要缩放8倍
-
-        coords_list = generate_coords_list(
-            non_overlapping_blocks=non_overlapping_blocks,
-            patch_size=opt.patch_size,
-            stride=stride
-        )
-        # --- 新增：调用调试函数将 coords_list 保存到 txt 文件 ---
-        # 为了方便管理，我们将调试文件保存在输出目录中
-        debug_txt_filename = f"debug_coords_{os.path.basename(wsi_files[idx])}.txt"
-        debug_txt_path = os.path.join(opt.out, debug_txt_filename)
-        save_coords_to_txt(coords_list, debug_txt_path)
-        # --- 调试代码结束 ---
-
-
-        # 创建全景图需要的张量
-        latent = torch.zeros((1, opt.C_latent, H // 8, W // 8), device=device)
-        count = torch.zeros_like(latent)
-        value = torch.zeros_like(latent)
-        blank = torch.zeros_like(latent, dtype=torch.bool)
-
-
-        # 初始latent的获取过程，ddim reverse
-        print(f"开始获取初始latent")
-        for coord in tqdm(coords_list, desc="Encoding patches", unit="patch"):
-            x_pixel, y_pixel = coord
-            x_latent = x_pixel // 8
-            y_latent = y_pixel // 8
-
-            region_img = slide.read_region((x_pixel, y_pixel), 0, (patch_size, patch_size)).convert("RGB")
-            region_tensor = preprocess_region(region_img).to(device)  # 转换为张量并移动到设备上
-            z_0_patch = model.get_first_stage_encoding(model.encode_first_stage(region_tensor))  # shape: [1, C, h//8, w//8]
-            # encode_ddim是一个“加噪”的过程，实现的
-            z_T_patch, _ = sampler.encode_ddim(
-                    z_0_patch.clone(),
-                    num_steps=ddim_inversion_steps,
-                    unconditional_conditioning=uc,
-                    end_step=time_idx_dict[ddim_inversion_steps - 1 - opt.start_step]
-                )
-
-            latent[:, :, y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent] += z_T_patch
-            count[:, :, y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent] += 1
-            blank[:, :, y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent] = True # 记录有哪些部分被包含到去噪list当中 
-
-        latent = torch.where(count > 0, latent / count, latent)  # 避免除以0
-
-        print(f"初始latent获取完成")
-
-
-        iterator = tqdm(time_range, desc='DDIM Sampler', total=ddim_inversion_steps)
-
-
-        # 开启循环 遍历50步DDIM去噪
-        for i,  step in enumerate(iterator):    
-            print(f"开始第 {i+1} 步去噪，当前时间步: {step}")            
-            count.zero_()
-            value.zero_()
-
-            # a. 为当前步骤准备参数
-            index = ddim_inversion_steps - i - 1
-            # .to(device) 确保 ts 张量和模型在同一设备上
-            ts = torch.full((1,), step, device=device, dtype=torch.long)
+        # 遍历所有wsi文件
+        for idx, h5_file in tqdm(enumerate(h5_files), total=len(h5_files), desc="Processing H5 files"):
+            # 读取坐标列表 打开slide
+            non_overlapping_blocks = read_h5_coords(h5_files[idx])
+            # coords_list = read_h5_coords(h5_files[idx])
+            slide = openslide.OpenSlide(wsi_files[idx])
+            W, H = slide.dimensions
             
-            # 循环遍历每个窗口
-            for coord in coords_list:
-                x_pixel, y_pixel = coord # 在潜空间当中需要缩放8倍
+            stride = opt.stride
+            patch_size = opt.patch_size
+            patch_size_latent = opt.patch_size // 8 # 在潜空间当中需要缩放8倍
+
+            coords_list = generate_overlapping_coords(
+                coords =non_overlapping_blocks,
+                patch_size=patch_size,
+                stride=stride
+            )
+
+            # save_coords_to_txt(coords_array=coords_list,output_path=os.path.join(f"coords_{os.path.basename(h5_file).split('.')[0]}.txt"))
+
+            # 创建全景图需要的张量
+            latent = torch.zeros((1, opt.C_latent, H // 8, W // 8), device=device)
+            count = torch.zeros_like(latent)
+            value = torch.zeros_like(latent)
+            blank = torch.zeros_like(latent, dtype=torch.bool)
+
+
+            # 初始latent的获取过程，ddim reverse
+            print(f"开始获取初始latent")
+            for coord in tqdm(coords_list, desc="Encoding patches", unit="patch"):
+                x_pixel, y_pixel = coord
                 x_latent = x_pixel // 8
                 y_latent = y_pixel // 8
 
-                # 进行处理 在这一步为了简化，直接尝试采用每一步提取qkv
-                # 1. 提取当前内容图的patch
                 region_img = slide.read_region((x_pixel, y_pixel), 0, (patch_size, patch_size)).convert("RGB")
                 region_tensor = preprocess_region(region_img).to(device)  # 转换为张量并移动到设备上
-                # a. VAE编码
                 z_0_patch = model.get_first_stage_encoding(model.encode_first_stage(region_tensor))  # shape: [1, C, h//8, w//8]
-                # b. DDIM Inversion 捕获特征
-                _, _ = sampler.encode_ddim(z_0_patch.clone(), 
-                                            num_steps=ddim_inversion_steps,
-                                            unconditional_conditioning=uc,
-                                            end_step=i,
-                                            # callback_ddim_timesteps=i,
-                                            img_callback=cnt_ddim_sampler_callback)
-                # 此处callback_ddim_timesteps不能为0，解决： 不传入callback_ddim_timesteps，则 encode__ddim() 会在每个时间步（np.flip(self.ddim_timesteps)）都调用 img_callback
-                
-                injected_features_i = feat_maps[i] 
+                # encode_ddim是一个“加噪”的过程，实现的
+                z_T_patch, _ = sampler.encode_ddim(
+                        z_0_patch.clone(),
+                        num_steps=ddim_inversion_steps,
+                        unconditional_conditioning=uc,
+                        end_step=time_idx_dict[ddim_inversion_steps - 1 - opt.start_step]
+                    )
 
-
-                # 从全局latent当中提取出 patch view
-                latent_patch = latent[:, :, y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent]
-
-                # 2. 执行单步去噪
-                latents_view_denoised, _ = sampler.p_sample_ddim(
-                    x=latent_patch,
-                    c=None,
-                    t=ts , index=index, 
-                    unconditional_conditioning=uc,
-                    injected_features=injected_features_i,
-                )
-
-                value[:, :, y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent] += latents_view_denoised
+                latent[:, :, y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent] += z_T_patch
                 count[:, :, y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent] += 1
+                blank[:, :, y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent] = True # 记录有哪些部分被包含到去噪list当中 
 
-            # 融合所有patches -- new latent
-            latent = torch.where(count > 0, value / count, value)
+            latent = torch.where(count > 0, latent / count, latent)  # 避免除以0
+
+            print(f"初始latent获取完成")
+
+
+            iterator = tqdm(time_range, desc='DDIM Sampler', total=ddim_inversion_steps)
+
+
+            # 开启循环 遍历50步DDIM去噪
+            for i,  step in enumerate(iterator):    
+                print(f"开始第 {i+1} 步去噪，当前时间步: {step}")            
+                count.zero_()
+                value.zero_()
+
+                # a. 为当前步骤准备参数
+                index = ddim_inversion_steps - i - 1
+                # .to(device) 确保 ts 张量和模型在同一设备上
+                ts = torch.full((1,), step, device=device, dtype=torch.long)
+                
+                # 循环遍历每个窗口
+                for coord in coords_list:
+                    x_pixel, y_pixel = coord # 在潜空间当中需要缩放8倍
+                    x_latent = x_pixel // 8
+                    y_latent = y_pixel // 8
+
+                    # 进行处理 在这一步为了简化，直接尝试采用每一步提取qkv
+                    # 1. 提取当前内容图的patch
+                    region_img = slide.read_region((x_pixel, y_pixel), 0, (patch_size, patch_size)).convert("RGB")
+                    region_tensor = preprocess_region(region_img).to(device)  # 转换为张量并移动到设备上
+                    # a. VAE编码
+                    z_0_patch = model.get_first_stage_encoding(model.encode_first_stage(region_tensor))  # shape: [1, C, h//8, w//8]
+                    # b. DDIM Inversion 捕获特征
+                    _, _ = sampler.encode_ddim(z_0_patch.clone(), 
+                                                num_steps=ddim_inversion_steps,
+                                                unconditional_conditioning=uc,
+                                                end_step=i,
+                                                # callback_ddim_timesteps=i,
+                                                img_callback=cnt_ddim_sampler_callback)
+                    # 此处callback_ddim_timesteps不能为0，解决： 不传入callback_ddim_timesteps，则 encode__ddim() 会在每个时间步（np.flip(self.ddim_timesteps)）都调用 img_callback
+                    
+                    injected_features_i = feat_maps[i] 
+
+
+                    # 从全局latent当中提取出 patch view
+                    latent_patch = latent[:, :, y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent]
+
+                    # 2. 执行单步去噪
+                    latents_view_denoised, _ = sampler.p_sample_ddim(
+                        x=latent_patch,
+                        c=None,
+                        t=ts , index=index, 
+                        unconditional_conditioning=uc,
+                        injected_features=injected_features_i,
+                    )
+
+                    value[:, :, y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent] += latents_view_denoised
+                    count[:, :, y_latent:y_latent+patch_size_latent, x_latent:x_latent+patch_size_latent] += 1
+
+                # 融合所有patches -- new latent
+                latent = torch.where(count > 0, value / count, value)
+                
+            print(f"所有去噪步骤完成")
             
-        print(f"所有去噪步骤完成")
-        
-        final_wsi_np = latent_decode(
-            latent_tensor=latent,
-            coords_list=coords_list,
-            model=model,
-            wsi_dimensions=(W, H),
-            downsample_factor=8,
-            patch_size_latent=patch_size_latent,
-            device=device
-        )
-        
-        print("[INFO] 保存tiff文件和缩略图中......")
+            final_wsi_np = latent_decode(
+                latent_tensor=latent,
+                coords_list=coords_list,
+                model=model,
+                wsi_dimension=(W, H),
+                downsample_factor=8,
+                patch_size_latent=patch_size_latent,
+                device=device
+            )
+            
+            print("[INFO] 保存tiff文件和缩略图中......")
 
-        # 获取 WSI 名称 (去掉 .svs 后缀)
-        wsi_basename = os.path.basename(wsi_files[idx])
-        wsi_name, _ = os.path.splitext(wsi_basename)
+            # 获取 WSI 名称 (去掉 .svs 后缀)
+            wsi_basename = os.path.basename(wsi_files[idx])
+            wsi_name, _ = os.path.splitext(wsi_basename)
 
-        print("使用 tifffile 保存为 BigTIFF 格式...")
-        out_filename = f"{wsi_name}_{style_name}_{ddim_inversion_steps}_{opt.stride}.tiff"
-        output_path = os.path.join(opt.out, out_filename)
-        tifffile.imwrite(output_path, final_wsi_np, bigtiff=True)
-        print(f"tiff图像已成功保存到: {output_path}")
+            print("使用 tifffile 保存为 BigTIFF 格式...")
+            out_filename = f"{wsi_name}_{style_name}_{ddim_inversion_steps}_{opt.stride}.tiff"
+            output_path = os.path.join(opt.out, out_filename)
+            tifffile.imwrite(output_path, final_wsi_np, bigtiff=True)
+            print(f"tiff图像已成功保存到: {output_path}")
 
-        # 保存缩略图
-        THUMBNAIL_WIDTH = 1024
-        img = Image.fromarray(final_wsi_np)
-        thumbnail_height = int(THUMBNAIL_WIDTH * (H / W))
-        thumbnail_img = img.resize((THUMBNAIL_WIDTH, thumbnail_height), Image.Resampling.LANCZOS)
-        png_output_path = os.path.join(opt.out, out_filename + ".png")
-        thumbnail_img.save(png_output_path)
+            # 保存缩略图
+            THUMBNAIL_WIDTH = 1024
+            img = Image.fromarray(final_wsi_np)
+            thumbnail_height = int(THUMBNAIL_WIDTH * (H / W))
+            thumbnail_img = img.resize((THUMBNAIL_WIDTH, thumbnail_height), Image.Resampling.LANCZOS)
+            png_output_path = os.path.join(opt.out, out_filename + ".png")
+            thumbnail_img.save(png_output_path)
 
 
 
