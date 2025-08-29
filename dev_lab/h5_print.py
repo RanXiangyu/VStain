@@ -75,7 +75,7 @@ def read_h5_to_txt(h5_file_path, txt_file_path):
 if __name__ == "__main__":
     # --- 读取H5文件并写入TXT ---
     # 定义你的H5文件路径和希望输出的TXT文件路径
-    input_h5_file = '/data2/ranxiangyu/vstain/h5/patches/22811he.h5'  # <--- 请将这里替换成你的H5文件路径
-    output_txt_file = 'output_32_clam.txt' # <--- 这是输出的TXT文件名
+    input_h5_file = '/data2/ranxiangyu/kidney_patch/kidney_patch_512/level0/patches/22811he.h5'  # <--- 请将这里替换成你的H5文件路径
+    output_txt_file = 'level0.txt' # <--- 这是输出的TXT文件名
 
     read_h5_to_txt(input_h5_file, output_txt_file)
