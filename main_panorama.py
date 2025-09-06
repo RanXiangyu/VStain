@@ -337,7 +337,7 @@ def main():
             source=opt.wsi,
             save_dir=opt.out_h5,
             patch_size=opt.patch_size,
-            step_size=480,
+            step_size=opt.stride,
             patch_level=0,
             seg=True,
             patch=True,

@@ -2,10 +2,77 @@ import openslide
 import h5py
 import numpy as np
 import torchvision.transforms as transforms
-from torch.utils.data import Dataset
-from tqdm import tqdm
-import pathlib 
+from torch.utils.data import Dataset, ConcatDataset
 
+
+class WSIDataset(Dataset):
+    """
+    单个 WSI + H5 对应的数据集
+    """
+    def __init__(self, wsi_path, h5_path, patch_size=512, level=0, transform=None):
+        self.patch_size = patch_size
+        self.level = level
+        self.wsi_path = wsi_path
+        self.h5_path = h5_path
+
+        # 打开 WSI 句柄
+        self.wsi_handle = openslide.OpenSlide(wsi_path)
+
+        # 读取 patch 坐标
+        with h5py.File(h5_path, 'r') as hf:
+            self.coords = hf['coords'][:]
+
+        # 定义图像转换
+        if transform is None:
+            self.transform = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))
+            ])
+        else:
+            self.transform = transform
+
+    def __len__(self):
+        return len(self.coords)
+
+    def __getitem__(self, idx):
+        x, y = self.coords[idx]
+        tile_pil = self.wsi_handle.read_region(
+            (int(x), int(y)), 
+            self.level, 
+            (self.patch_size, self.patch_size)
+        )
+        tile_rgb = tile_pil.convert("RGB")
+        tile_tensor = self.transform(tile_rgb)
+        return tile_tensor, np.array([x, y])
+
+    def close(self):
+        """关闭当前 WSI 句柄"""
+        self.wsi_handle.close()
+
+
+class MultiWSIDataset(ConcatDataset):
+    """
+    多个 WSI Dataset 的拼接（适合训练）
+    """
+    def __init__(self, wsi_paths, h5_paths, patch_size=512, level=0, transform=None):
+        if len(wsi_paths) != len(h5_paths):
+            raise ValueError("wsi_paths 与 h5_paths 长度不一致！")
+
+        datasets = [
+            WSIDataset(wsi, h5, patch_size=patch_size, level=level, transform=transform)
+            for wsi, h5 in zip(wsi_paths, h5_paths)
+        ]
+        super().__init__(datasets)
+        self.datasets = datasets
+
+    def close(self):
+        """关闭所有子 Dataset 的句柄"""
+        for d in self.datasets:
+            d.close()
+
+
+""" 
+此dataset会将h5文件全部排列
 class WSIDataset(Dataset):
     def __init__(self, wsi_paths, h5_paths, patch_size=512, level=0, transform=None):
         self.patch_size = patch_size
@@ -57,14 +124,10 @@ class WSIDataset(Dataset):
 
 
     def __len__(self):
-        """返回所有 WSI 中切片的总数。"""
         return len(self.index_map)
 
 
     def __getitem__(self, idx):
-        """
-        从正确的 WSI 文件中读取并返回单个切片及其坐标。
-        """
         wsi_idx, x, y = self.index_map[idx]
         wsi_handle = self.wsi_handles[wsi_idx]
         tile_pil = wsi_handle.read_region(
@@ -74,10 +137,20 @@ class WSIDataset(Dataset):
         )
         tile_rgb = tile_pil.convert("RGB")
         tile_tensor = self.transform(tile_rgb)
-        return tile_tensor, np.array([x, y])
+        return tile_tensor, np.array([x, y]) # 返回图像和坐标
+
+    def get_wsi_info(self, idx=None):
+        if idx is not None:
+            if idx < 0 or idx >= len(self.index_map):
+                raise IndexError(f"索引 {idx} 超出范围 (0 ~ {len(self.index_map)-1})")
+            wsi_idx, _, _ = self.index_map[idx]
+            return wsi_idx
+        else:
+            return len(set([w[0] for w in self.index_map]))
 
     def close(self):
-        """关闭所有已打开的 WSI 文件句柄。"""
         print("正在关闭所有 WSI 文件句柄...")
         for handle in self.wsi_handles:
             handle.close()
+
+"""

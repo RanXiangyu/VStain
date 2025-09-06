@@ -1,20 +1,34 @@
-import torch
-import numpy as np
-from PIL import Image
+import pickle
+import h5py
 
-import torchvision.transforms as transforms
+def save_pkl(filename, save_object):
+	writer = open(filename,'wb')
+	pickle.dump(save_object, writer)
+	writer.close()
+
+def load_pkl(filename):
+	loader = open(filename,'rb')
+	file = pickle.load(loader)
+	loader.close()
+	return file
 
 
-
-# 定义加载图片函数
-def load_img(path):
-    image = Image.open(path).convert("RGB")
-    x, y = image.size
-    print(f"Loaded input image of size ({x}, {y}) from {path}")
-    h = w = 512
-    image = transforms.CenterCrop(min(x,y))(image)
-    image = image.resize((w, h), resample=Image.Resampling.LANCZOS)
-    image = np.array(image).astype(np.float32) / 255.0
-    image = image[None].transpose(0, 3, 1, 2)
-    image = torch.from_numpy(image)
-    return 2.*image - 1.
+def save_hdf5(output_path, asset_dict, attr_dict= None, mode='a', chunk_size=32):
+    with h5py.File(output_path, mode) as file:
+        for key, val in asset_dict.items():
+            data_shape = val.shape
+            if key not in file:
+                data_type = val.dtype
+                chunk_shape = (chunk_size, ) + data_shape[1:]
+                maxshape = (None, ) + data_shape[1:]
+                dset = file.create_dataset(key, shape=data_shape, maxshape=maxshape, chunks=chunk_shape, dtype=data_type)
+                dset[:] = val
+                if attr_dict is not None:
+                    if key in attr_dict.keys():
+                        for attr_key, attr_val in attr_dict[key].items():
+                            dset.attrs[attr_key] = attr_val
+            else:
+                dset = file[key]
+                dset.resize(len(dset) + data_shape[0], axis=0)
+                dset[-data_shape[0]:] = val
+    return output_path

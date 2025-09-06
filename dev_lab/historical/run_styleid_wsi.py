@@ -25,12 +25,12 @@ import pickle
     --gamma 0.75 --T 1.5
     --precomputed /data2/ranxiangyu/styleid_out/precomputed_feats \
 
-    python main.py \
+    python main_panorama.py \
     --wsi /data2/ranxiangyu/vstain/wsi \
     --sty /data2/ranxiangyu/vstain/sty \
     --out /data2/ranxiangyu/vstain \
     --out_h5 /data2/ranxiangyu/vstain/h5 \
-    --stride 480 \
+    --stride 512 \
     --batch_size 8 \
     --ddim_inv_steps 3 \
     --save_feat_steps 2 \
