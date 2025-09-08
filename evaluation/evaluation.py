@@ -19,16 +19,6 @@ from wsi_core.WSIDataset_evaluation import WSIDataset_evaluation
 Image.MAX_IMAGE_PIXELS = None
 ALLOWED_IMAGE_EXTENSIONS = ['jpg', 'JPG', 'jpeg', 'JPEG', 'png', 'PNG']
 
-
-
-# 遍历所有输入图像，用 Inception 模型提取特征
-def get_activations(files, model, batch_size=50, dims=2048, device='cuda',num_workers=1):
-    model.eval()
-
-    if batch_size > len(files):
-        print("Warning: batch size is bigger than the data size. Setting batch size to data size")
-        batch_size = len(files)
-    
     
 def compute_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
     mu1 = np.atleast_1d(mu1)
