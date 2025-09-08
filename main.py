@@ -8,21 +8,22 @@ from pytorch_lightning import seed_everything #设置随机种子
 from torch import autocast
 from contextlib import nullcontext
 import copy
-import pathlib
 from pathlib import Path
 import time
 import pickle
 from tqdm import tqdm
+import torchvision.transforms as transforms
+from torch.utils.data import DataLoader
 
 from ldm.util import instantiate_from_config
 from ldm.models.diffusion.ddim import DDIMSampler
 
-import torchvision.transforms as transforms
-import torch.nn.functional as F
-from torch.utils.data import DataLoader
 
 from wsi_core.WSIDataset import WSIDataset
 from utils.load_img import load_img
+from utils.hdf5 import get_sorted_h5_files, get_sorted_wsi_files, read_h5_coords
+from wsi_core.create_patches_fp import WSIPatchExtractor
+
 
 
 feat_maps = [] # 全局变量，用于存储特征图
@@ -111,9 +112,9 @@ def get_opt():
     return opt
 
 def main(opt):
-    feat_path_root = opt.precomputed
-
     seed_everything(22) # 设置随机种子
+
+    feat_path_root = opt.precomputed
     # 创建输出文件夹 如果有则不创建
     os.makedirs(opt.output, exist_ok=True)
     # 创建特征文件夹 如果有则不创建
