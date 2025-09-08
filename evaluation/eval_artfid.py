@@ -29,33 +29,23 @@ CKPT_URL = 'https://huggingface.co/matthias-wright/art_inception/resolve/main/ar
 # 用于加载图像路径的数据集类
 class ImagePathDataset(torch.utils.data.Dataset):
     def __init__(self, files, transforms=None):
-        self.files = files
-        self.transforms = transforms
+        self.files = files # 包含所有图像文件的路径
+        self.transforms = transforms # 图像预处理变换
 
     def __len__(self):
         return len(self.files)
 
-    def __getitem__(self, i):
+    def __getitem__(self, i): # 获取单个样本
         path = self.files[i]
         img = Image.open(path).convert('RGB')
         if self.transforms is not None:
             img = self.transforms(img)
         return img
 
-# 用于计算所有图像的激活值
+
+
+# 遍历所有输入图像，用 Inception 模型提取特征（通常是 2048 维）  输出形状：(num_images, 2048)
 def get_activations(files, model, batch_size=50, device='cpu', num_workers=1):
-    """Computes the activations of for all images.
-
-    Args:
-        files (list): List of image file paths.
-        model (torch.nn.Module): Model for computing activations.
-        batch_size (int): Batch size for computing activations.
-        device (torch.device): Device for commputing activations.
-        num_workers (int): Number of threads for data loading.
-
-    Returns:
-        (): Activations of the images, shape [num_images, 2048].
-    """
     model.eval()
 
     if batch_size > len(files):
@@ -90,7 +80,8 @@ def get_activations(files, model, batch_size=50, device='cpu', num_workers=1):
     pbar.close()
     return pred_arr
 
-# 计算frechet距离
+
+# 计算FID的核心公式
 def compute_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
     """Numpy implementation of the Frechet Distance.
     
@@ -138,7 +129,7 @@ def compute_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
 
     return (diff.dot(diff) + np.trace(sigma1) + np.trace(sigma2) - 2 * tr_covmean)
 
-# 计算激活统计量
+# 用 get_activations 得到 (N,2048) 特征矩阵
 def compute_activation_statistics(files, model, batch_size=50, device='cpu', num_workers=1):
     """Computes the activation statistics used by the FID.
     
@@ -158,25 +149,7 @@ def compute_activation_statistics(files, model, batch_size=50, device='cpu', num
     sigma = np.cov(act, rowvar=False)
     return mu, sigma
 
-# 用于获取指定目录中的图像路径
-def get_image_paths(path, sort=False):
-    """Returns the paths of the images in the specified directory, filtered by allowed file extensions.
 
-    Args:
-        path (str): Path to image directory.
-        sort (bool): Sort paths alphanumerically.
-
-    Returns:
-        (list): List of image paths with allowed file extensions.
-
-    """
-    paths = []
-    # 使用 glob 查找所有符合扩展名的文件
-    for extension in ALLOWED_IMAGE_EXTENSIONS:
-        paths.extend(glob.glob(os.path.join(path, f'*.{extension}')))
-    if sort:
-        paths.sort()
-    return paths
 
 def compute_fid(path_to_stylized, path_to_style, batch_size, device, num_workers=1):
     """Computes the FID for the given paths.
@@ -194,7 +167,7 @@ def compute_fid(path_to_stylized, path_to_style, batch_size, device, num_workers
     device = torch.device('cuda') if device == 'cuda' and torch.cuda.is_available() else torch.device('cpu')
 
     # ckpt_file = utils.download(CKPT_URL)
-     # 修改这里，使用本地文件路径
+    # 修改这里，使用本地文件路径
     ckpt_file = '/data2/ranxiangyu/checkpoints/art_inception.pth'
     ckpt = torch.load(ckpt_file, map_location=device)
     
@@ -218,16 +191,14 @@ def compute_fid_infinity(path_to_stylized, path_to_style, batch_size, device, nu
     Args:
         path_to_stylized (str): Path to the stylized images.
         path_to_style (str): Path to the style images.
-        batch_size (int): Batch size for computing activations.
-        device (str): Device for commputing activations.
-        num_points (int): Number of FID_N we evaluate to fit a line.
-        num_workers (int): Number of threads for data loading.
+        num_points (int): Number of FID_N we evaluate to fit a line. 用于拟合线性回归的 FID 点数量
 
     Returns:
         (float) FID infinity value.
     """
     device = torch.device('cuda') if device == 'cuda' and torch.cuda.is_available() else torch.device('cpu')
 
+    # 加载inception模型
     # ckpt_file = utils.download(CKPT_URL)
     # 修改为本地ckpt文件代码
     ckpt_file = '/data2/ranxiangyu/checkpoints/art_inception.pth'
@@ -241,9 +212,10 @@ def compute_fid_infinity(path_to_stylized, path_to_style, batch_size, device, nu
     style_image_paths = get_image_paths(path_to_style)
 
     # 断言 为了确保风格化图像和风格图像数量一致
-    # assert len(stylized_image_paths) == len(style_image_paths), \
-    #        f'Number of stylized images and number of style images must be equal.({len(stylized_image_paths)},{len(style_image_paths)})'
+    assert len(stylized_image_paths) == len(style_image_paths), \
+           f'Number of stylized images and number of style images must be equal.({len(stylized_image_paths)},{len(style_image_paths)})'
 
+    # 用inception模型提取特征
     activations_stylized = get_activations(stylized_image_paths, model, batch_size, device, num_workers)
     activations_style = get_activations(style_image_paths, model, batch_size, device, num_workers)
     # 图像的索引数组，用于随机采样
@@ -282,27 +254,21 @@ def compute_fid_infinity(path_to_stylized, path_to_style, batch_size, device, nu
 
 def compute_content_distance(path_to_stylized, path_to_content, batch_size, content_metric='lpips', device='cuda', num_workers=1, gray=False):
     """Computes the distance for the given paths.
-
     Args:
-        path_to_stylized (str): Path to the stylized images.
-        path_to_style (str): Path to the style images.
-        batch_size (int): Batch size for computing activations.
-        content_metric (str): Metric to use for content distance. Choices: 'lpips', 'vgg', 'alexnet'
-        device (str): Device for commputing activations.
-        num_workers (int): Number of threads for data loading.
-
+        content_metric (str): Metric to use for content distance. Choices: 'lpips', 'vgg', 'alexnet' 选择距离计算的方法
     Returns:
-        (float) FID value.
+        平均内容距离
     """
     device = torch.device('cuda') if device == 'cuda' and torch.cuda.is_available() else torch.device('cpu')
 
-    # Sort paths in order to match up the stylized images with the corresponding content image
+    # 获取图像路径并排序
     stylized_image_paths = get_image_paths(path_to_stylized, sort=True)
     content_image_paths = get_image_paths(path_to_content, sort=True)
 
     assert len(stylized_image_paths) == len(content_image_paths), \
            'Number of stylized images and number of content images must be equal.'
-
+    
+    # 图像预处理 transformers
     if gray:
         content_transforms = Compose([Resize(512), Grayscale(),
         ToTensor()])
@@ -310,6 +276,7 @@ def compute_content_distance(path_to_stylized, path_to_content, batch_size, cont
         content_transforms = Compose([Resize(512),
         ToTensor()])
     
+    # 创建 Dataset 和 DataLoader
     dataset_stylized = ImagePathDataset(stylized_image_paths, transforms=content_transforms)
     dataloader_stylized = torch.utils.data.DataLoader(dataset_stylized,
                                                       batch_size=batch_size,
@@ -334,6 +301,7 @@ def compute_content_distance(path_to_stylized, path_to_content, batch_size, cont
     else:
         raise ValueError(f'Invalid content metric: {content_metric}')
 
+    # 计算内容距离
     dist_sum = 0.0
     N = 0
     pbar = tqdm(total=len(stylized_image_paths))
@@ -349,77 +317,8 @@ def compute_content_distance(path_to_stylized, path_to_content, batch_size, cont
 
     return dist_sum / N
 
-def compute_patch_simi(path_to_stylized, path_to_content, batch_size, device, num_workers=1):
-    """Computes the distance for the given paths.
-
-    Args:
-        path_to_stylized (str): Path to the stylized images.
-        path_to_style (str): Path to the style images.
-        batch_size (int): Batch size for computing activations.
-        content_metric (str): Metric to use for content distance. Choices: 'lpips', 'vgg', 'alexnet'
-        device (str): Device for commputing activations.
-        num_workers (int): Number of threads for data loading.
-
-    Returns:
-        (float) FID value.
-    """
-    device = torch.device('cuda') if device == 'cuda' and torch.cuda.is_available() else torch.device('cpu')
-
-    # Sort paths in order to match up the stylized images with the corresponding content image
-    stylized_image_paths = get_image_paths(path_to_stylized, sort=True)
-    content_image_paths = get_image_paths(path_to_content, sort=True)
-
-    assert len(stylized_image_paths) == len(content_image_paths), \
-           'Number of stylized images and number of content images must be equal.'
-
-    style_transforms = ToTensor()
-    
-    dataset_stylized = ImagePathDataset(stylized_image_paths, transforms=style_transforms)
-    dataloader_stylized = torch.utils.data.DataLoader(dataset_stylized,
-                                                      batch_size=batch_size,
-                                                      shuffle=False,
-                                                      drop_last=False,
-                                                      num_workers=num_workers)
-
-    dataset_content = ImagePathDataset(content_image_paths, transforms=style_transforms)
-    dataloader_content = torch.utils.data.DataLoader(dataset_content,
-                                                     batch_size=batch_size,
-                                                     shuffle=False,
-                                                     drop_last=False,
-                                                     num_workers=num_workers)
-    
-    metric = image_metrics.PatchSimi(device=device).to(device)
-
-    dist_sum = 0.0
-    N = 0
-    pbar = tqdm(total=len(stylized_image_paths))
-    for batch_stylized, batch_content in zip(dataloader_stylized, dataloader_content):
-        with torch.no_grad():
-            batch_dist = metric(batch_stylized.to(device), batch_content.to(device))
-            N += batch_stylized.shape[0]
-            dist_sum += torch.sum(batch_dist)
-
-        pbar.update(batch_stylized.shape[0])
-
-    pbar.close()
-
-    return dist_sum / N
 
 def compute_art_fid(path_to_stylized, path_to_style, path_to_content, batch_size, device, mode='art_fid_inf', content_metric='lpips', num_workers=1):
-    """Computes the FID for the given paths.
-
-    Args:
-        path_to_stylized (str): Path to the stylized images.
-        path_to_style (str): Path to the style images.
-        path_to_content (str): Path to the content images.
-        batch_size (int): Batch size for computing activations.
-        device (str): Device for commputing activations.
-        content_metric (str): Metric to use for content distance. Choices: 'lpips', 'vgg', 'alexnet'
-        num_workers (int): Number of threads for data loading.
-        mode: 决定风格距离的计算方式
-    Returns:
-        (float) ArtFID value.
-    """
     print('Compute FID value...')
     if mode == 'art_fid_inf':
         fid_value = compute_fid_infinity(path_to_stylized, path_to_style, batch_size, device, num_workers)
@@ -441,25 +340,98 @@ def compute_art_fid(path_to_stylized, path_to_style, path_to_content, batch_size
     # art_fid_value = (cnt_value + 1) * (fid_value + 1)
     return art_fid_value.item(), fid_value.item(), cnt_value.item(), gray_cnt_value.item(), 
 
+
+"""以下计算CSFD"""
+
+def compute_patch_simi(path_to_stylized, path_to_content, batch_size, device, num_workers=1):
+    """Computes the distance for the given paths.
+    Args:
+        content_metric (str): Metric to use for content distance. Choices: 'lpips', 'vgg', 'alexnet'
+    Returns:
+        (float) 成对图像的平均 patch similarity 距离
+    """
+    # device = torch.device('cuda') if device == 'cuda' and torch.cuda.is_available() else torch.device('cpu')
+
+    # 根据路径获取图像路径并排序以匹配样式化图像与对应的内容图像
+    stylized_image_paths = get_image_paths(path_to_stylized, sort=True)
+    content_image_paths = get_image_paths(path_to_content, sort=True)
+
+    # 确保两者相等
+    assert len(stylized_image_paths) == len(content_image_paths), \
+           'Number of stylized images and number of content images must be equal.'
+
+    style_transforms = ToTensor() # 定义图像转换方法
+    
+    # 创建数据集和数据加载器
+    dataset_stylized = ImagePathDataset(stylized_image_paths, transforms=style_transforms)
+    dataloader_stylized = torch.utils.data.DataLoader(dataset_stylized,
+                                                      batch_size=batch_size,
+                                                      shuffle=False,
+                                                      drop_last=False,
+                                                      num_workers=num_workers)
+
+    dataset_content = ImagePathDataset(content_image_paths, transforms=style_transforms)
+    dataloader_content = torch.utils.data.DataLoader(dataset_content,
+                                                     batch_size=batch_size,
+                                                     shuffle=False,
+                                                     drop_last=False,
+                                                     num_workers=num_workers)
+    # 初始化用于计算距离的度量类
+    metric = image_metrics.PatchSimi(device=device).to(device)
+
+    dist_sum = 0.0
+    N = 0
+    pbar = tqdm(total=len(stylized_image_paths))
+    # 遍历样式化图像和内容图像的批次
+    for batch_stylized, batch_content in zip(dataloader_stylized, dataloader_content):
+        with torch.no_grad():
+            batch_dist = metric(batch_stylized.to(device), batch_content.to(device)) 
+            #得到一个逐图像的距离张量，累加和平均
+            N += batch_stylized.shape[0]
+            dist_sum += torch.sum(batch_dist)
+
+        pbar.update(batch_stylized.shape[0])
+
+    pbar.close()
+
+    return dist_sum / N
+
+
 def compute_cfsd(path_to_stylized, path_to_content, batch_size, device, num_workers=1):
     """Computes CFSD for the given paths.
-
     Args:
-        path_to_stylized (str): Path to the stylized images.
-        path_to_content (str): Path to the content images.
         batch_size (int): Batch size for computing activations.
-        device (str): Device for commputing activations.
-        num_workers (int): Number of threads for data loading.
-
+        num_workers (int): Number of threads for data loading. cpu上完成，后台加载数据使用的cpu进程数量，备菜
     Returns:
         (float) CFSD value.
     """
     print('Compute CFSD value...')
 
+    # 计算 Patch Similarity，该函数返回样式化图像和内容图像的距离值
     simi_val = compute_patch_simi(path_to_stylized, path_to_content, 1, device, num_workers)
-    simi_dist = f'{simi_val.item():.4f}'
+    simi_dist = f'{simi_val.item():.4f}'# 将距离值保留四位小数
     return simi_dist
 
+
+# 用于获取指定目录中的图像路径
+def get_image_paths(path, sort=False):
+    """Returns the paths of the images in the specified directory, filtered by allowed file extensions.
+
+    Args:
+        path (str): Path to image directory.
+        sort (bool): Sort paths alphanumerically.
+
+    Returns:
+        (list): List of image paths with allowed file extensions.
+
+    """
+    paths = []
+    # 使用 glob 查找所有符合扩展名的文件
+    for extension in ALLOWED_IMAGE_EXTENSIONS:
+        paths.extend(glob.glob(os.path.join(path, f'*.{extension}')))
+    if sort:
+        paths.sort()
+    return paths
 # 创建一个新函数，用于调整样式图像路径列表以匹配目标图像数量
 def adjust_paths(stylized_paths, input_paths):
     """
@@ -491,17 +463,6 @@ def adjust_paths(stylized_paths, input_paths):
     return adjusted_input_paths
 
 def main():
-    '''
-    关于metric的应用
-    1. 首先从命令行获取content_metric参数
-        lpips默认基于alexnet vgg网络的lpip实现 alexnet网络 ssim评估结构信息、亮度和对比度的保留程度,对细节保持较为敏感, mm-ssim是多尺度结构相似性度量
-    2. 将args.content_metric传递给compute_art_fid函数 
-    3. 在compute_art_fid函数中  根据content_metric的值选择相应的metric类
-    根据content_metric的值选择相应的metric类
-    3. 在计算内容距离时  将选定的metric传递给compute_content_distance函数
-    4. 在compute_content_distance函数中  使用选定的metric类来计算内容距离
-    5. 最后返回计算得到的内容距离值
-    '''
     parser = argparse.ArgumentParser()
     parser.add_argument('--batch_size', type=int, default=1, help='Batch size for computing activations.')
     parser.add_argument('--num_workers', type=int, default=8, help='Number of threads used for data loading.')

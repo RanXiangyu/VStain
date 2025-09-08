@@ -43,7 +43,7 @@ class WSIDataset(Dataset):
         )
         tile_rgb = tile_pil.convert("RGB")
         tile_tensor = self.transform(tile_rgb)
-        return tile_tensor, np.array([x, y])
+        return tile_tensor, 
 
     def close(self):
         """关闭当前 WSI 句柄"""
