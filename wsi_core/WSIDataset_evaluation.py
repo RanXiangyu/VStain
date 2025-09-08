@@ -130,6 +130,7 @@ class MultiWSIDataset_evaluation(Dataset):
             self.tiff_handles[wsi_idx] = tifffile.TiffFile(self.file_pairs[wsi_idx]['stained'])
 
         wsi_handle = self.wsi_handles[wsi_idx]
+
         tiff_page = self.tiff_handles[wsi_idx].pages[0]
         
         # 读取坐标并提取patch (与之前的逻辑相同)
