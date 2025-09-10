@@ -24,7 +24,16 @@ from utils.load_img import load_img
 from utils.hdf5 import get_sorted_h5_files, get_sorted_wsi_files, read_h5_coords
 from wsi_core.create_patches_fp import WSIPatchExtractor
 
+'''
+python main.py \
+--sty /mnt/hfang/data/VStain/sty \
+--wsi_dir /home/hfang/rxy/kidney_wsi \
+--output /mnt/hfang/data/VStain/output \
+--out_h5 /mnt/hfang/data/VStain/h5 \
+--precomputed /mnt/hfang/data/VStain/precomputed_feats \
+--stride 512 --patch_size 512 --num_files 1 --is_patch
 
+'''
 
 feat_maps = [] # 全局变量，用于存储特征图
 
@@ -83,12 +92,18 @@ def get_opt():
     # 文件路径设置
     parser.add_argument('--sty', default = '/data2/ranxiangyu/vstain/sty')
     parser.add_argument('--wsi_dir', default = '/data2/ranxiangyu/vstain/wsi')
-    parser.add_argument('--h5_dir', default = '/data2/ranxiangyu/vstain/h5/patches')
+    # parser.add_argument('--h5_dir', default = '/data2/ranxiangyu/vstain/h5/patches')
     parser.add_argument('--output', type=str, default='/data2/ranxiangyu/vstain/output')
+    parser.add_argument('--out_h5', help='Output directory', required=True)
     parser.add_argument('--precomputed', type=str, default='/data2/ranxiangyu/vstain/precomputed_feats', help='保存预训练权重')
+    # 切片和hdf5设置
+    parser.add_argument('--patch_size', type=int, default=512, help='Size of the patches')
+    parser.add_argument('--stride', type=int, default=512, help='步长')
+    parser.add_argument('--batch_size', type=int, default=32, help='Batch size for processing')
+    parser.add_argument('--num_files', type=int, default=4, help='需要处理的文件数量')
+    parser.add_argument("--is_patch", action="store_true", help="是否需要进行切片处理")
     # 图像设置
     parser.add_argument('--patch_level', default = 0, type=int)
-    parser.add_argument('--patch_size', default = 512, type=int)
     parser.add_argument('--C', type=int, default=4, help='latent channels')
     parser.add_argument('--f', type=int, default=8, help='downsampling factor')
     # DDIM设置
@@ -114,6 +129,32 @@ def get_opt():
 def main(opt):
     seed_everything(22) # 设置随机种子
 
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+
+    wsi_extractor = WSIPatchExtractor()
+    if opt.is_patch:
+        #  在这一步利用clam生成重叠的点
+        # 修改代码 auto_skip=False 不自动跳步
+        wsi_extractor.process(
+            source=opt.wsi_dir,
+            save_dir=opt.out_h5,
+            patch_size=opt.patch_size,
+            step_size=opt.stride,
+            patch_level=opt.patch_level,
+            seg=True,
+            patch=True,
+            stitch=False,
+            save_mask=False,
+            auto_skip=False,
+            num_files=opt.num_files
+        )
+    else: # 检查作用
+        wsi_extractor.process(source=opt.wsi, save_dir=opt.out_h5, patch_size=opt.patch_size, step_size=opt.patch_size, patch_level=0, seg=True, patch=True, stitch=False, save_mask=False, num_files=opt.num_files)
+    
+
+
     feat_path_root = opt.precomputed
     # 创建输出文件夹 如果有则不创建
     os.makedirs(opt.output, exist_ok=True)
@@ -129,7 +170,6 @@ def main(opt):
     ddim_inversion_steps = opt.ddim_inv_steps
     save_feature_timesteps = ddim_steps = opt.save_feat_steps
 
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu") # 判断是否有cuda
     model = model.to(device)
     unet_model = model.model.diffusion_model
     sampler = DDIMSampler(model) # 初始化DDIM采样器 DDIM继承自model 作为DDPM/ldm的一个推广
@@ -195,7 +235,9 @@ def main(opt):
     begin = time.time() # 开始计时
 
     # 修正后的代码块
-    h5_files = sorted(Path(opt.h5_dir).glob("*.h5"))
+    h5_dir = os.path.join(opt.out_h5, "patches")
+
+    h5_files = sorted(Path(h5_dir).glob("*.h5"))
     wsi_files = {f.stem: f for f in Path(opt.wsi_dir).glob("*") if f.suffix.lower() in [".svs", ".tif", ".tiff"]}
 
     for h5_file in h5_files:
@@ -241,8 +283,6 @@ def main(opt):
         
             # for i, (region_tensor, coord) in enumerate(dataloader):
             for i, (region_tensor, coord) in enumerate(tqdm(dataloader, desc="Processing patches", total=len(dataloader))):
-                # tiles_batch: 一个包含图像数据的 Tensor
-                # coords_batch: 一个包含对应坐标的 Tensor
                 region_tensor = region_tensor.to(device) # 将图像数据移动到指定设备（通常是 GPU）
                 coord = coord.numpy()[0] # 获取坐标并转换为 numpy 数组
 
@@ -268,12 +308,9 @@ def main(opt):
                                 adain_z_enc = adain(region_z_enc, sty_z_enc)
                         # 合并特征图
                         feat_maps = feat_merge(opt, region_feat, sty_feat, start_step=start_step)
-                        # 如果命令行参数的without_attn_injection为真，则不注入特征图
                         if opt.without_attn_injection:
                             feat_maps = None
 
-                        # inference shsape = [opt.C, opt.H // opt.f, opt.W // opt.f]  形状 default=[4, 64, 64]
-                        # injected_features 用来控制风格 已经是merge之后的feat_maps
                         samples_ddim, _ = sampler.sample(S=ddim_steps,
                                                         batch_size=1,
                                                         shape=shape,
