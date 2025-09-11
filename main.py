@@ -14,6 +14,8 @@ import pickle
 from tqdm import tqdm
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
+import shutil
+from tempfile import TemporaryDirectory
 
 from ldm.util import instantiate_from_config
 from ldm.models.diffusion.ddim import DDIMSampler
@@ -32,7 +34,7 @@ python main.py \
 --output /mnt/hfang/data/VStain/output \
 --out_h5 /mnt/hfang/data/VStain/h5 \
 --precomputed /mnt/hfang/data/VStain/precomputed_feats \
---stride 512 --patch_size 512 --num_files 1 --is_patch
+--stride 512 --patch_size 512 --num_files 10 --skip_h5 1
 
 '''
 
@@ -123,6 +125,7 @@ def get_opt():
     # 代码运行设置
     parser.add_argument("--without_init_adain", action='store_true')
     parser.add_argument("--without_attn_injection", action='store_true')
+    parser.add_argument("--skip_h5", type=int, default=0, help="跳过多少顺序处理文件")
     opt = parser.parse_args()
 
     return opt
@@ -133,27 +136,35 @@ def main(opt):
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
+    with TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        for f in Path(opt.wsi_dir).glob("*.svs"):
+            if f.stem.endswith("he"):
+                shutil.copy(f, tmpdir)
 
-    wsi_extractor = WSIPatchExtractor()
-    if opt.is_patch:
-        #  在这一步利用clam生成重叠的点
-        # 修改代码 auto_skip=False 不自动跳步
-        wsi_extractor.process(
-            source=opt.wsi_dir,
-            save_dir=opt.out_h5,
-            patch_size=opt.patch_size,
-            step_size=opt.stride,
-            patch_level=opt.patch_level,
-            seg=True,
-            patch=True,
-            stitch=False,
-            save_mask=False,
-            auto_skip=False,
-            num_files=opt.num_files
-        )
-    else: # 检查作用
-        wsi_extractor.process(source=opt.wsi, save_dir=opt.out_h5, patch_size=opt.patch_size, step_size=opt.patch_size, patch_level=0, seg=True, patch=True, stitch=False, save_mask=False, num_files=opt.num_files)
-    
+        wsi_extractor = WSIPatchExtractor()
+        if opt.is_patch:
+            #  在这一步利用clam生成重叠的点
+            # 修改代码 auto_skip=False 不自动跳步
+            wsi_extractor.process(
+                source=str(tmpdir),
+                save_dir=opt.out_h5,
+                patch_size=opt.patch_size,
+                step_size=opt.stride,
+                patch_level=opt.patch_level,
+                seg=True,
+                patch=True,
+                stitch=False,
+                save_mask=False,
+                auto_skip=False,
+                num_files=opt.num_files
+            )
+        else: # 检查作用
+            wsi_extractor.process(source=opt.wsi, save_dir=opt.out_h5, 
+                                  patch_size=opt.patch_size, step_size=opt.patch_size, 
+                                  patch_level=0, seg=True, patch=True, stitch=False, 
+                                  save_mask=False, num_files=opt.num_files)
+        
 
     # 特征文件夹的创建
     feat_path_root = opt.precomputed
@@ -234,7 +245,7 @@ def main(opt):
     # 修正后的代码块
     h5_dir = os.path.join(opt.out_h5, "patches")
 
-    h5_files = sorted(Path(h5_dir).glob("*.h5"))
+    h5_files = sorted(Path(h5_dir).glob("*.h5"))[opt.skip_h5:]  # 跳过前 opt.skip_h5 个文件
     wsi_files = {f.stem: f for f in Path(opt.wsi_dir).glob("*") if f.suffix.lower() in [".svs", ".tif", ".tiff"]}
     """ wsi_files = {
     "22811he": Path("/path/to/22811he.svs"),
