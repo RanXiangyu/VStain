@@ -23,6 +23,7 @@ from wsi_core.WSIDataset import WSIDataset
 from utils.load_img import load_img
 from utils.hdf5 import get_sorted_h5_files, get_sorted_wsi_files, read_h5_coords
 from wsi_core.create_patches_fp import WSIPatchExtractor
+from utils.reconstruct_vips import reconstruct_with_original_background, bigtiff_to_thumbnail, save_pyramidal_tiff
 
 '''
 python main.py \
@@ -154,18 +155,14 @@ def main(opt):
         wsi_extractor.process(source=opt.wsi, save_dir=opt.out_h5, patch_size=opt.patch_size, step_size=opt.patch_size, patch_level=0, seg=True, patch=True, stitch=False, save_mask=False, num_files=opt.num_files)
     
 
-
+    # 特征文件夹的创建
     feat_path_root = opt.precomputed
-    # 创建输出文件夹 如果有则不创建
     os.makedirs(opt.output, exist_ok=True)
-    # 创建特征文件夹 如果有则不创建
     if len(feat_path_root) > 0:
         os.makedirs(feat_path_root, exist_ok=True)
     
     model_config = OmegaConf.load(f"{opt.model_config}") 
     model = load_model_from_config(model_config, f"{opt.ckpt}") 
-    # 设置设备和采样器
-    # 通过 argparse 解析， 用于指定在哪些 U-Net block 中提取自注意力层的特征，并不需要在所有层数当中提取QKV
     self_attn_output_block_indices = list(map(int, opt.attn_layer.split(',')))
     ddim_inversion_steps = opt.ddim_inv_steps
     save_feature_timesteps = ddim_steps = opt.save_feat_steps
@@ -239,7 +236,11 @@ def main(opt):
 
     h5_files = sorted(Path(h5_dir).glob("*.h5"))
     wsi_files = {f.stem: f for f in Path(opt.wsi_dir).glob("*") if f.suffix.lower() in [".svs", ".tif", ".tiff"]}
-
+    """ wsi_files = {
+    "22811he": Path("/path/to/22811he.svs"),
+    "22812he": Path("/path/to/22812he.tif"),
+    ...
+    } """
     for h5_file in h5_files:
         stem = h5_file.stem
         if stem not in wsi_files:
@@ -280,6 +281,17 @@ def main(opt):
                                                    img_callback=ddim_sampler_callback)
                 sty_feat = copy.deepcopy(feat_maps) # 保存callback特征信息
                 sty_z_enc = feat_maps[0]['z_enc'] 
+
+            # 1为当前的WSI和风格创建特定的输出目录
+            current_output_dir = Path(opt.output) / stem / sty_path.stem # output/wsi_file_stem/style_image_stem/
+            current_output_dir.mkdir(parents=True, exist_ok=True)
+
+            tiff_output_filename = f"{stem}_stylized_{sty_path.stem}_reconstructed.tiff"
+            tiff_output_path = Path(opt.output) / stem / tiff_output_filename
+
+            thumb_output_filename = f"{stem}_stylized_{sty_path.stem}_reconstructed.png"
+            thumb_output_path = Path(opt.output) / stem / thumb_output_filename
+
         
             # for i, (region_tensor, coord) in enumerate(dataloader):
             for i, (region_tensor, coord) in enumerate(tqdm(dataloader, desc="Processing patches", total=len(dataloader))):
@@ -329,10 +341,7 @@ def main(opt):
                         x_sample = 255. * rearrange(x_image_torch[0].cpu().numpy(), 'c h w -> h w c')
                         img = Image.fromarray(x_sample.astype(np.uint8))
                         
-                        # 1. 为当前的WSI和风格创建特定的输出目录
-                        current_output_dir = Path(opt.output) / stem / sty_path.stem # output/wsi_file_stem/style_image_stem/
-                        current_output_dir.mkdir(parents=True, exist_ok=True)
-
+                        
                         # 2. 使用坐标创建唯一的文件名
                         output_filename = f"{stem}_stylized_{sty_path.stem}_x{coord[0]}_y{coord[1]}.png"
                         output_filepath = current_output_dir / output_filename
@@ -345,6 +354,9 @@ def main(opt):
                 if not os.path.isfile(sty_feat_name):
                     with open(sty_feat_name, 'wb') as h:
                         pickle.dump(sty_feat, h)
+
+            reconstruct_with_original_background(tile_dir=current_output_dir,original_wsi_path=wsi_path,output_path=tiff_output_path)
+            bigtiff_to_thumbnail(tiff_path=tiff_output_path, thumbnail_path=thumb_output_path, scale_factor=0.1)  # 可以调缩放比例
 
         dataset.close()
 

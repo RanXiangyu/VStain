@@ -1,11 +1,13 @@
 import openslide
 import tifffile
 from torch.utils.data import Dataset
-# 假设您有一个 utils.hdf5.read_h5_coords 函数
-# from utils.hdf5 import read_h5_coords 
 import torchvision.transforms as transforms
 import numpy as np
 from PIL import Image
+from tqdm import tqdm
+import glob
+import re
+import os
 
 # 作为一个示例，如果 read_h5_coords 不存在，可以先用这个代替
 import h5py
@@ -89,18 +91,80 @@ class WSIDataset_evaluation(Dataset):
         self.tiff_handle.close()
         print("WSI and TIFF file handles closed.")
 
+def make_dict(file_list, prefix_only=False):
+    """
+    将文件路径转成 {id: path} 字典
+    prefix_only=True 表示只取文件名前缀（处理 stained 文件的情况）
+    """
+    d = {}
+    for f in file_list:
+        fname = os.path.basename(f)
+        if prefix_only:
+            # 取第一个下划线前的部分
+            key = fname.split("_")[0]
+        else:
+            key = os.path.splitext(fname)[0]
+        d[key] = f
+    return d
 
 
 class MultiWSIDataset_evaluation(Dataset):
-    def __init__(self, file_pairs, patch_size=512, patch_level=0, transform=None):
-        self.file_pairs = file_pairs
+    def __init__(self, wsi_dir, stained_dir, h5_dir, patch_size=512, patch_level=0, transform=None):
         self.patch_size = patch_size
         self.patch_level = patch_level
-        self.transform = transform # ... (与之前相同的 transform 逻辑) ...
+
+        wsi_files = glob.glob(os.path.join(wsi_dir, '*.svs'))
+        stained_files = glob.glob(os.path.join(stained_dir, '*.tiff'))
+        h5_files = glob.glob(os.path.join(h5_dir, '*.h5'))
+
+        # 建立索引字典
+        wsi_dict = make_dict(wsi_files)                # 22811he → xxx/22811he.svs
+        h5_dict = make_dict(h5_files)                  # 22811he → xxx/22811he.h5
+        # stained_dict = make_dict(stained_files, True)  # 22811he → xxx/22811he_stylized_masson_reconstructed.tiff
+
+        # 对 stained 文件，保留原图 id + 染色类型
+        stained_list = []
+        for f in stained_files:
+            fname = os.path.basename(f) # 取文件名
+            base, _ = os.path.splitext(fname)
+            # 假设格式: 22811he_stylized_masson_reconstructed
+            parts = base.split('_') # 用下划线分割
+            wsi_id = parts[0]
+            style = "_".join(parts[2:-1]) if len(parts) > 3 else parts[2]  # masson 或 pasm
+            stained_list.append((wsi_id, style, f))
+
+        # 构造 file_pairs：每种染色作为一条记录
+        self.file_pairs = []
+        for wsi_id, style, stained_path in stained_list:
+            if wsi_id in wsi_dict and wsi_id in h5_dict:
+                self.file_pairs.append({
+                    "id": wsi_id,
+                    "style": style,
+                    "wsi": wsi_dict[wsi_id],
+                    "h5": h5_dict[wsi_id],
+                    "stained": stained_path
+                })
+
+        # 找到三者共有的 id
+        if not self.file_pairs:
+            raise ValueError("No matching WSI, H5 and stained files found.")
+
+
+        print(f"Matched {len(self.file_pairs)} WSI datasets.")
+
+        if transform is None:
+            self.transform = transforms.Compose([
+                transforms.Resize((299, 299)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225])
+            ])
+        else:
+            self.transform = transform
 
         # --- 核心逻辑：预计算索引 ---
-        self.wsi_handles = [None] * len(file_pairs)
-        self.tiff_handles = [None] * len(file_pairs)
+        self.wsi_handles = [None] * len(self.file_pairs)
+        self.tiff_handles = [None] * len(self.file_pairs)
         
         self.patch_counts = []
         print("Scanning H5 files to build index...")
@@ -117,7 +181,6 @@ class MultiWSIDataset_evaluation(Dataset):
 
     def __getitem__(self, global_idx):
         # 根据全局索引找到它属于哪个WSI
-        # np.searchsorted 效率很高
         wsi_idx = np.searchsorted(self.cumulative_patch_counts, global_idx, side='right') - 1
         
         # 计算在该WSI内部的局部索引
@@ -130,17 +193,38 @@ class MultiWSIDataset_evaluation(Dataset):
             self.tiff_handles[wsi_idx] = tifffile.TiffFile(self.file_pairs[wsi_idx]['stained'])
 
         wsi_handle = self.wsi_handles[wsi_idx]
-
         tiff_page = self.tiff_handles[wsi_idx].pages[0]
         
         # 读取坐标并提取patch (与之前的逻辑相同)
         with h5py.File(self.file_pairs[wsi_idx]['h5'], 'r') as f:
             coord = f['coords'][local_idx]
+
         
         x, y = int(coord[0]), int(coord[1])
-        # ... (后续的 patch 读取和 transform 逻辑与原 Dataset 完全相同) ...
-        # ... 返回 content_patch, stylized_patch, np.array([x, y]) ...
-        return #... (省略，与原版相同)
+        patch_dims = (self.patch_size, self.patch_size)
+
+        # --- 读取内容 patch ---
+        content_patch_pil = wsi_handle.read_region(
+            (x, y), 
+            self.patch_level, 
+            patch_dims
+        ).convert('RGB')
+
+        # --- 读取风格化 patch ---
+        stylized_patch_np = tiff_page.asarray(
+            key=slice(y, y + self.patch_size), 
+            col=slice(x, x + self.patch_size)
+        )
+
+        if stylized_patch_np.ndim == 2: # 灰度转三通道
+            stylized_patch_np = np.stack([stylized_patch_np]*3, axis=-1)
+        stylized_patch_pil = Image.fromarray(stylized_patch_np).convert('RGB')
+
+        # --- transform ---
+        content_patch = self.transform(content_patch_pil)
+        stylized_patch = self.transform(stylized_patch_pil)
+        
+        return content_patch, stylized_patch, np.array([x, y])
 
     def close(self):
         # 关闭所有已打开的文件句柄

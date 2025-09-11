@@ -151,7 +151,7 @@ if __name__ == '__main__':
 
 
 """
-python reconstruct_vips.py --tile_dir /data2/ranxiangyu/vstain/output/22811he/pasm  --original_wsi /data2/ranxiangyu/vstain/wsi/22811he.svs
+python reconstruct_vips.py --tile_dir /mnt/hfang/data/VStain/output/22811he/pas  --original_wsi /home/hfang/rxy/kidney_wsi/22811he.svs
 
 
 """

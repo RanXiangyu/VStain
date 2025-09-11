@@ -2,10 +2,8 @@ name: StyleID
 channels:
   - pytorch
   - https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge/
-  - conda-forge
   - defaults
 dependencies:
-  - openslide    
   - _libgcc_mutex=0.1=main
   - _openmp_mutex=5.1=1_gnu
   - blas=1.0=mkl
@@ -21,14 +19,14 @@ dependencies:
   - gnutls=3.6.15=he1e5248_0
   - idna=3.7=py38h06a4308_0
   - intel-openmp=2021.4.0=h06a4308_3561
-  - jpeg
+  - jpeg=9e=h5eee18b_3
   - lame=3.100=h7b6447c_0
   - lcms2=2.16=hb9589c4_0
   - ld_impl_linux-64=2.40=h12ee557_0
   - lerc=4.0.0=h6a678d5_0
   - libdeflate=1.22=h5eee18b_0
   - libffi=3.3=he6710b0_2
-  - libgcc-ng
+  - libgcc-ng=11.2.0=h1234567_1
   - libgfortran-ng=11.2.0=h00389a5_1
   - libgfortran5=11.2.0=h1234567_1
   - libgomp=11.2.0=h1234567_1
@@ -37,7 +35,7 @@ dependencies:
   - libpng=1.6.39=h5eee18b_0
   - libstdcxx-ng=11.2.0=h1234567_1
   - libtasn1=4.19.0=h5eee18b_0
-  - libtiff
+  - libtiff=4.5.1=hffd6297_1
   - libunistring=0.9.10=h27cfd23_0
   - libuv=1.48.0=h5eee18b_0
   - libwebp-base=1.3.2=h5eee18b_1
@@ -68,8 +66,9 @@ dependencies:
   - urllib3=2.2.3=py38h06a4308_0
   - wheel=0.44.0=py38h06a4308_0
   - xz=5.6.4=h5eee18b_1
-  - zlib
-  - zstd
+  - zlib=1.2.13=h5eee18b_1
+  - zstd=1.5.6=hc292b87_0
+  # - openslide-python
   - pip:
       - absl-py==2.1.0
       - aiohappyeyeballs==2.4.4
@@ -110,7 +109,7 @@ dependencies:
       - oauthlib==3.2.2
       - omegaconf==2.1.1
       - opencv-python==4.11.0.86
-      # - openslide-python==1.4.1
+      - openslide-python==1.4.1
       - packaging==24.2
       - pandas==2.0.3
       - propcache==0.2.0
@@ -145,4 +144,4 @@ dependencies:
       - werkzeug==3.0.6
       - yarl==1.15.2
       - zipp==3.20.2
-
+prefix: /home/ranxiangyu/anaconda3/envs/StyleID
