@@ -70,10 +70,17 @@ class WSIDataset_evaluation(Dataset):
         ).convert('RGB')
         
         # 2. 从TIFF文件中读取风格化patch
-        stylized_patch_np = self.tiff_page.asarray(
-            key=slice(y, y + self.patch_size), 
-            col=slice(x, x + self.patch_size)
-        )
+        # stylized_patch_np = self.tiff_page.asarray(
+        #     key=slice(y, y + self.patch_size), 
+        #     col=slice(x, x + self.patch_size)
+        # )
+        # Create the slices for the y (row) and x (column) dimensions
+        y_slice = slice(y, y + self.patch_size)
+        x_slice = slice(x, x + self.patch_size)
+
+        # Slice the TiffPage object directly to read only the desired region
+        # stylized_patch_np = self.tiff_page.asarray(key=(y_slice, x_slice))
+        stylized_patch_np = self.tiff_page.asarray()[y_slice, x_slice]
         # 确保 numpy 数组是 HWC 格式并且是 uint8 类型
         if stylized_patch_np.ndim == 2: # 如果是灰度图，扩展为3通道
             stylized_patch_np = np.stack([stylized_patch_np]*3, axis=-1)

@@ -134,37 +134,37 @@ def main(opt):
     seed_everything(22) # 设置随机种子
 
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cuda" if torch.cuda.is_available() else "cpu"        
 
-    with TemporaryDirectory() as tmpdir:
-        tmpdir = Path(tmpdir)
-        for f in Path(opt.wsi_dir).glob("*.svs"):
-            if f.stem.endswith("he"):
-                shutil.copy(f, tmpdir)
+    wsi_dir = Path(opt.wsi_dir)
+    he_files_paths = sorted(wsi_dir.glob("*he.svs"))
+    he_files_str_paths = [str(p) for p in he_files_paths]
+    if not he_files_str_paths:
+        print(f"在目录 {opt.wsi_dir} 中没有找到任何以 'he.svs' 结尾的文件。")
+        return # 或者 exit()
 
-        wsi_extractor = WSIPatchExtractor()
-        if opt.is_patch:
-            #  在这一步利用clam生成重叠的点
-            # 修改代码 auto_skip=False 不自动跳步
-            wsi_extractor.process(
-                source=str(tmpdir),
-                save_dir=opt.out_h5,
-                patch_size=opt.patch_size,
-                step_size=opt.stride,
-                patch_level=opt.patch_level,
-                seg=True,
-                patch=True,
-                stitch=False,
-                save_mask=False,
-                auto_skip=False,
-                num_files=opt.num_files
-            )
-        else: # 检查作用
-            wsi_extractor.process(source=opt.wsi, save_dir=opt.out_h5, 
-                                  patch_size=opt.patch_size, step_size=opt.patch_size, 
-                                  patch_level=0, seg=True, patch=True, stitch=False, 
-                                  save_mask=False, num_files=opt.num_files)
-        
+    print(f"已找到 {len(he_files_str_paths)} 个 'he.svs' 文件，将进行处理。")
+
+    wsi_extractor = WSIPatchExtractor()
+    if opt.is_patch:
+        wsi_extractor.process(
+            source=he_files_str_paths,  # <--- 直接传递筛选后的文件路径列表
+            save_dir=opt.out_h5,
+            patch_size=opt.patch_size,
+            step_size=opt.stride,
+            patch_level=opt.patch_level,
+            seg=True,
+            patch=True,
+            stitch=False,
+            save_mask=False,
+            auto_skip=False,
+            num_files=opt.num_files
+        ) 
+    else: # 检查作用
+        wsi_extractor.process(source=he_files_str_paths, save_dir=opt.out_h5, 
+                                patch_size=opt.patch_size, step_size=opt.patch_size, 
+                                patch_level=0, seg=True, patch=True, stitch=False, 
+                                save_mask=False, num_files=opt.num_files)
 
     # 特征文件夹的创建
     feat_path_root = opt.precomputed

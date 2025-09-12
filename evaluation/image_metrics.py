@@ -1,52 +1,15 @@
 import lpips
 import torch
 import torch.nn as nn
-import os
-import sys
-
-
-# 在导入其他模块前修补 torchvision.models
-def patch_model_loading():
-    """修补 torchvision.models 和 lpips 库以使用本地权重文件"""
-    # 保存原始函数
-    original_load = torch.hub.load_state_dict_from_url
-    
-    # 定义新的加载函数
-    def load_local_weights(url, model_dir=None, *args, **kwargs):
-        filename = url.split('/')[-1]
-        local_weights = {
-            'alexnet-owt-7be5be79.pth': '/data2/ranxiangyu/checkpoints/alexnet-owt-7be5be79.pth',
-            'vgg16-397923af.pth': '/data2/ranxiangyu/checkpoints/vgg16-397923af.pth',
-            'vgg19-dcbb9e9d.pth': '/data2/ranxiangyu/checkpoints/vgg19-dcbb9e9d.pth'
-        }
-        
-        if filename in local_weights and os.path.exists(local_weights[filename]):
-            print(f"使用本地权重: {local_weights[filename]}")
-            # 加载权重，并更新模型的 state_dict
-            state_dict = torch.load(local_weights[filename])
-            return state_dict
-        
-        # 如果没有找到本地文件，使用原始函数
-        print(f"未找到本地权重文件，尝试从 {url} 下载")
-        return original_load(url, model_dir, *args, **kwargs)
-    
-    # 替换函数
-    torch.hub.load_state_dict_from_url = load_local_weights
-    
-    # 修补 torchvision.models 以使用环境变量
-    os.environ['TORCH_HOME'] = '/data2/ranxiangyu/checkpoints'
-    print(f"设置 TORCH_HOME 为: {os.environ['TORCH_HOME']}")
-
-# 立即应用补丁
-# patch_model_loading()
-
 
 import net
+
 import torch.nn.functional as F
 from PIL import Image
 import torchvision.transforms as transforms
 import torchvision.models as models
 import math
+import torch.nn.functional as F
 
 def calc_mean_std(feat, eps=1e-5):
     # eps is a small value added to the variance to avoid divide-by-zero.
@@ -65,47 +28,6 @@ def normalize(x):
     return x
 
 
-
-class Metric(nn.Module):
-
-    def __init__(self, metric_type='vgg'):
-        super(Metric, self).__init__()
-        self.metric_type = metric_type
-
-        if metric_type == 'vgg':
-            self.model = lpips.pn.vgg16(pretrained=False)
-            if weights_path:
-                self.model.load_state_dict(torch.load(weights_path))
-
-        elif metric_type == 'alexnet':
-            self.model = lpips.pn.alexnet(pretrained=False)
-            if weights_path:
-                self.model.load_state_dict(torch.load(weights_path))
-
-        elif metric_type == 'ssim':
-            ssim_module = SSIM(data_range=1, size_average=False, channel=3) # channel=1 for grayscale images
-            self.model = ssim_module
-        elif metric_type == 'ms-ssim':
-            ms_ssim_module = MS_SSIM(data_range=1, size_average=False, channel=3)
-            self.model = ms_ssim_module
-        else:
-            raise ValueError(f'Invalid metric type: {metric_type}')
-
-    def forward(self, x, y):
-        if self.metric_type == 'ssim' or self.metric_type == 'ms-ssim':
-            dist = self.model(x, y)
-            return dist
-        
-        else:
-            features_x = self.model(normalize(x))._asdict()
-            features_y = self.model(normalize(y))._asdict()
-            
-            dist = 0.0
-            for layer in features_x.keys():
-                dist += torch.mean(torch.square(features_x[layer] - features_y[layer]), dim=(1, 2, 3))
-            return dist / len(features_x)
-
-'''
 class Metric(nn.Module):
 
     def __init__(self, metric_type='vgg'):
@@ -137,105 +59,39 @@ class Metric(nn.Module):
             for layer in features_x.keys():
                 dist += torch.mean(torch.square(features_x[layer] - features_y[layer]), dim=(1, 2, 3))
             return dist / len(features_x)
-'''
-def load_pretrained_model(model_fn, weight_path):
-    model = model_fn(pretrained=False)  # 关闭自动下载
-    state_dict = torch.load(weight_path, map_location='cpu')  # 加载本地权重
-    model.load_state_dict(state_dict, strict=False)  # 允许部分加载
-    return model
-'''
-class Metric(nn.Module):
-    def __init__(self, metric_type='vgg'):
-        super(Metric, self).__init__()
-        self.metric_type = metric_type
-        
-        weight_paths = {
-            'vgg': '/data2/ranxiangyu/checkpoints/vgg16-397923af.pth',
-            'alexnet': '/data2/ranxiangyu/checkpoints/alexnet-owt-7be5be79.pth'
-        }
-        
-        if metric_type == 'vgg':
-            self.model = load_pretrained_model(models.vgg16, weight_paths['vgg']).features
-        elif metric_type == 'alexnet':
-            self.model = load_pretrained_model(models.alexnet, weight_paths['alexnet']).features
-        elif metric_type == 'ssim':
-            self.model = SSIM(data_range=1, size_average=False, channel=3)
-        elif metric_type == 'ms-ssim':
-            self.model = MS_SSIM(data_range=1, size_average=False, channel=3)
-        else:
-            raise ValueError(f'Invalid metric type: {metric_type}')
 
-    def forward(self, x, y):
-        if self.metric_type in ['ssim', 'ms-ssim']:
-            return self.model(x, y)
-        
-        else:
-            features_x = self.model(normalize(x))._asdict()
-            features_y = self.model(normalize(y))._asdict()
-            
-            dist = sum(torch.mean(torch.square(features_x[layer] - features_y[layer]), dim=(1, 2, 3)) 
-                       for layer in features_x.keys())
-            return dist / len(features_x)
-'''
-
-# 修改LPIPS类
 class LPIPS(nn.Module):
-    def __init__(self, weights_path=None):
+
+    def __init__(self):
         super(LPIPS, self).__init__()
-        if weights_path and os.path.exists(weights_path):
-            # 先创建模型但不加载预训练权重
-            self.dist = lpips.LPIPS(net='alex', pretrained=False)
-            # 然后手动加载本地权重
-            self.dist.load_state_dict(torch.load(weights_path))
-        else:
-            # 如果没有提供权重路径或权重不存在，使用默认行为（会下载权重）
-            self.dist = lpips.LPIPS(net='alex')
+        self.dist = lpips.LPIPS(net='alex')
 
     def forward(self, x, y):
         # images must be in range [-1, 1]
         dist = self.dist(2 * x - 1, 2 * y - 1)
         return dist
 
-# 修改LPIPS_vgg类
 class LPIPS_vgg(nn.Module):
-    def __init__(self, weights_path=None):
+
+    def __init__(self):
         super(LPIPS_vgg, self).__init__()
-        if weights_path and os.path.exists(weights_path):
-            # 先创建模型但不加载预训练权重
-            self.dist = lpips.LPIPS(net='vgg', pretrained=False)
-            # 然后手动加载本地权重
-            self.dist.load_state_dict(torch.load(weights_path))
-        else:
-            # 如果没有提供权重路径或权重不存在，使用默认行为（会下载权重）
-            self.dist = lpips.LPIPS(net='vgg')
+        self.dist = lpips.LPIPS(net='vgg')
 
     def forward(self, x, y):
         # images must be in range [-1, 1]
         dist = self.dist(2 * x - 1, 2 * y - 1)
         return dist
-
-
 
 class PatchSimi(nn.Module):
-    def __init__(self, device=None, weights_path=None):
+
+    def __init__(self, device=None):
         super(PatchSimi, self).__init__()
-        # 创建模型但不下载预训练权重
-        self.model = models.vgg19(pretrained=False).features
-
-        # 如果提供了权重路径，加载本地权重
-        if weights_path:
-            state_dict = torch.load(weights_path)
-            # 仅加载特征提取部分的权重
-            features_dict = {k: v for k, v in state_dict.items() if k.startswith('features.')}
-            # 去掉"features."前缀
-            features_dict = {k.replace('features.', ''): v for k, v in features_dict.items()}
-            self.model.load_state_dict(features_dict)
-
-        self.model = self.model.to(device).eval()
+        self.model = models.vgg19(pretrained=True).features.to(device).eval()
         self.layers = {"11": "conv3"}
         self.norm_mean = (0.485, 0.456, 0.406)
         self.norm_std = (0.229, 0.224, 0.225)
         self.kld = torch.nn.KLDivLoss(reduction='batchmean')
+
         self.device = device
 
     def get_feats(self, img):
@@ -274,21 +130,10 @@ class PatchSimi(nn.Module):
         return init_loss
 
 class GramLoss(nn.Module):
-    def __init__(self, device=None, weights_path=None):
+
+    def __init__(self, device=None):
         super(GramLoss, self).__init__()
-        # 创建模型但不下载预训练权重
-        self.model = models.vgg19(pretrained=False).features
-
-        # 如果提供了权重路径，加载本地权重
-        if weights_path:
-            state_dict = torch.load(weights_path)
-            # 仅加载特征提取部分的权重
-            features_dict = {k: v for k, v in state_dict.items() if k.startswith('features.')}
-            # 去掉"features."前缀
-            features_dict = {k.replace('features.', ''): v for k, v in features_dict.items()}
-            self.model.load_state_dict(features_dict)
-
-        self.model = self.model.to(device).eval()
+        self.model = models.vgg19(pretrained=True).features.to(device).eval()
         self.layers = {
             "1":"conv1",
             "6":"conv2",

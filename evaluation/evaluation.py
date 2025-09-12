@@ -9,12 +9,25 @@ from sklearn.linear_model import LinearRegression
 from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, Normalize, Grayscale
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
+import sys
 
 import utils
 import inception
 import image_metrics
 
+# 将当前文件的上级目录（也就是项目根目录）添加到 sys.path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from wsi_core.WSIDataset_evaluation import WSIDataset_evaluation
+
+"""
+CUDA_VISIBLE_DEVICES=1 python evaluation/evaluation.py \
+    --wsi_path /home/hfang/rxy/kidney_wsi/22811he.svs \
+    --stained_path /mnt/hfang/data/VStain/output/22811he/22811he_stylized_masson_reconstructed.tiff \
+    --h5_path /mnt/hfang/data/VStain/h5/patches/22811he.h5 \
+    --ckpt_path /home/hfang/rxy/ckpt/inceptionv3.pth \
+    --patch_size 512 --patch_level 0 \
+    --batch_size 1 --num_workers 0 --content_metric lpips
+"""
 
 Image.MAX_IMAGE_PIXELS = None
 ALLOWED_IMAGE_EXTENSIONS = ['jpg', 'JPG', 'jpeg', 'JPEG', 'png', 'PNG']
@@ -79,19 +92,25 @@ def compute_activation_statistics_wsi(wsi_dataloader, model, image_type, device)
     sigma = np.cov(act, rowvar=False)
     return mu, sigma
 
-def compute_fid_wsi(wsi_dataloader, device):
-    # CKPT_URL = 'https://huggingface.co/matthias-wright/art_inception/resolve/main/art_inception.pth'
-    # ckpt_file = utils.download(CKPT_URL)
-    ckpt_file = '/data2/ranxiangyu/checkpoints/art_inception.pth' # 建议设为命令行参数
+def compute_fid_wsi(wsi_dataloader, device, ckpt_path):
     
-    device_obj = torch.device(device)
-    ckpt = torch.load(ckpt_file, map_location=device_obj)
-    model = inception.Inception3().to(device_obj)
+    device = torch.device('cuda') if device == 'cuda' and torch.cuda.is_available() else torch.device('cpu')
+
+    if not os.path.exists(ckpt_path):
+        raise FileNotFoundError(f"Checkpoint file not found at: {ckpt_path}. Please download it first or provide the correct path.")
+    
+    print(f"--- Loading Inception model from: {ckpt_path} ---")
+
+    # device_obj = torch.device(device)
+    ckpt = torch.load(ckpt_path) 
+    # 在这里删除了删除map_location，不给出 map_location参数的时候自动根据 ckpt 文件加载
+
+    model = inception.Inception3().to(device)
     model.load_state_dict(ckpt, strict=False)
     model.eval()
 
-    mu1, sigma1 = compute_activation_statistics_wsi(wsi_dataloader, model, 'stylized', device_obj)
-    mu2, sigma2 = compute_activation_statistics_wsi(wsi_dataloader, model, 'content', device_obj)
+    mu1, sigma1 = compute_activation_statistics_wsi(wsi_dataloader, model, 'stylized', device)
+    mu2, sigma2 = compute_activation_statistics_wsi(wsi_dataloader, model, 'content', device)
     
     return compute_frechet_distance(mu1, sigma1, mu2, sigma2)
 
@@ -118,17 +137,19 @@ def compute_content_distance_wsi(wsi_dataloader, content_metric, device):
 
 def get_opt():
     parser = argparse.ArgumentParser()
+    # 文件路径设置
     parser.add_argument('--sty', default = '/data2/ranxiangyu/vstain/sty')
     parser.add_argument('--wsi_path', default = '/data2/ranxiangyu/vstain/wsi')
     parser.add_argument('--stained_path', default = '/data2/ranxiangyu/vstain/wsi')
     parser.add_argument('--h5_path', default = '/data2/ranxiangyu/vstain/h5/patches')
+    parser.add_argument('--ckpt_path', type=str, default='/home/hfang/rxy/ckpt/inceptionv3.pth', help='Path to the Art Inception model checkpoint (.pth file).')
+    parser.add_argument('--device', type=str, default='cuda', choices=['cuda', 'cpu'], help='Device to use.')
 
     parser.add_argument('--patch_size', type=int, default=512, help='Size of the patches to extract.')
     parser.add_argument('--patch_level', type=int, default=0, help='WSI level to extract patches from.')
-    parser.add_argument('--device', type=str, default='cuda', choices=['cuda', 'cpu'], help='Device to use.')
 
 
-    # 文件路径设置
+    # parser.add_argument('--device', type=str, default='cuda', choices=['cuda', 'cpu'], help='Device to use.')
     parser.add_argument('--batch_size', type=int, default=1, help='Batch size for computing activations.')
     parser.add_argument('--num_workers', type=int, default=8, help='Number of threads used for data loading.')
     parser.add_argument('--content_metric', type=str, default='lpips', choices=['lpips', 'vgg', 'alexnet', 'ssim', 'ms-ssim'], help='Content distance.')
@@ -155,9 +176,11 @@ def main(opt):
         pin_memory=True
     )
     
+ 
+
     try:
-        print("\n--- Computing ArtFID ---")
-        artfid_value = compute_fid_wsi(dataloader, opt.device)
+        print("\n--- Computing FID ---")
+        artfid_value = compute_fid_wsi(wsi_dataloader = dataloader, device = opt.device, ckpt_path = opt.ckpt_path)
 
         print(f"\n--- Computing Content Distance ({opt.content_metric}) ---")
         content_dist_value = compute_content_distance_wsi(dataloader, opt.content_metric, opt.device)

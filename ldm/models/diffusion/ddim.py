@@ -117,7 +117,7 @@ class DDIMSampler(object):
         # sampling
         C, H, W = shape
         size = (batch_size, C, H, W)
-        print(f'Data shape for DDIM sampling is {size}, eta {eta}')
+        # print(f'Data shape for DDIM sampling is {size}, eta {eta}')
 
         samples, intermediates = self.ddim_sampling(conditioning, size,
                                                     negative_conditioning=negative_conditioning,
@@ -171,7 +171,7 @@ class DDIMSampler(object):
         intermediates = {'x_inter': [img], 'pred_x0': [img]}
         time_range = reversed(range(0,timesteps)) if ddim_use_original_steps else np.flip(timesteps)
         total_steps = timesteps if ddim_use_original_steps else timesteps.shape[0]
-        print(f"Running DDIM Sampling with {total_steps} timesteps")
+        # print(f"Running DDIM Sampling with {total_steps} timesteps")
 
         iterator = tqdm(time_range, desc='DDIM Sampler', total=total_steps)
 
@@ -181,7 +181,8 @@ class DDIMSampler(object):
         negative_prompt_alpha_schedule = self.make_negative_prompt_schedule(negative_prompt_schedule, negative_prompt_alpha, total_steps)
         style_loss = None
 
-        for i, step in enumerate(iterator):
+        # for i, step in enumerate(iterator):
+        for i, step in enumerate(time_range):
             index = total_steps - i - 1
             if index >= start_step:
                 continue
@@ -314,7 +315,8 @@ class DDIMSampler(object):
         if num_steps == 999:
             T = 999
             c = T // num_steps
-            iterator = tqdm(range(0,T ,c), desc='DDIM Inversion', total= num_steps)
+            # iterator = tqdm(range(0,T ,c), desc='DDIM Inversion', total= num_steps)
+            iterator = range(0, T, c) 
             steps = list(range(0,T + c,c))
         else:
             # 如果是自定义步数 例如 T=1000, num_steps=50 → c=20，那么 time_steps = [1, 21, 41, ..., 981]
@@ -399,7 +401,7 @@ class DDIMSampler(object):
 
         time_range = np.flip(timesteps)
         total_steps = timesteps.shape[0]
-        print(f"Running DDIM Sampling with {total_steps} timesteps")
+        # print(f"Running DDIM Sampling with {total_steps} timesteps")
 
         iterator = tqdm(time_range, desc='Decoding image', total=total_steps)
         x_dec = x_latent

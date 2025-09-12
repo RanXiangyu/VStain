@@ -13,6 +13,13 @@ import pandas as pd
 from tqdm import tqdm
 import sys
 import contextlib
+import os
+import pandas as pd
+import numpy as np
+from tqdm import tqdm
+from typing import Union, List # 建议在文件顶部引入类型提示
+
+
 
 '''
  python create_patches_fp.py \
@@ -121,9 +128,40 @@ class WSIPatchExtractor:
 		if patch_params is None:
 			patch_params = self.default_patch_params
 
+		wsi_full_path = []
+		
+
 		# 加载数据
-		slides = sorted(os.listdir(source))
-		slides = [slide for slide in slides if os.path.isfile(os.path.join(source, slide))]
+		# slides = sorted(os.listdir(source))
+		# slides = [slide for slide in slides if os.path.isfile(os.path.join(source, slide))]
+		# <<< --- 核心修改开始 --- >>>
+		
+		wsi_full_paths = []
+        # 1. 根据 source 类型，准备好 WSI 文件的完整路径列表
+		
+		if isinstance(source, str) and os.path.isdir(source):
+			print(f"源是目录: {source}，正在扫描文件...")
+			slides_in_dir = sorted(os.listdir(source))
+			wsi_full_paths = [os.path.join(source, s) for s in slides_in_dir if os.path.isfile(os.path.join(source, s))]
+		elif isinstance(source, list):
+			print(f"源是文件列表，共 {len(source)} 个文件。")
+			wsi_full_paths = source
+			
+		else:
+			raise TypeError(f"参数 'source' 必须是有效的目录路径 (str) 或文件路径列表 (list)，但收到了 {type(source)}")
+		
+		if not wsi_full_paths:
+			print("警告：未找到任何有效的WSI文件进行处理。")
+			return 0, 0 # 返回空结果
+
+        # 2. 从完整路径列表中提取文件名 (basename)，用于初始化 DataFrame
+		slides = [os.path.basename(p) for p in wsi_full_paths]
+
+        # 3. 创建一个从文件名到完整路径的映射字典，以便在循环中快速查找
+		path_map = {os.path.basename(p): p for p in wsi_full_paths}
+
+        # <<< --- 核心修改结束 --- >>>
+
 		if process_list is None:
 			df = initialize_df(slides, seg_params, filter_params, vis_params, patch_params)
 		
@@ -168,19 +206,16 @@ class WSIPatchExtractor:
 				continue
 
 			# Inialize WSI
-			full_path = os.path.join(source, slide)
+			# full_path = os.path.join(source, slide)
+            # <<< --- 循环内部的关键修改 --- >>>
+            # 不再使用 os.path.join(source, slide)，而是从我们的映射字典中查找完整路径
+			full_path = path_map.get(slide)
+			if not full_path:
+				print(f"错误：在文件列表中找不到 {slide} 对应的路径，已跳过。")
+				continue            
+			# <<< --- 循环内部修改结束 --- >>>
 			WSI_object = WholeSlideImage(full_path)
 
-			# WSI_object = WholeSlideImage(full_path)
-			# 修改跳过打不开的文件，并输出打不开的文件的列表
-		# 	try:
-		# 		WSI_object = WholeSlideImage(full_path)
-		# 	except Exception as e:
-		# 		 print(f"Error processing file {full_path}: {e}")
-		# # 记录错误文件以便之后检查
-		# with open("error_files.log", "a") as log_file:
-		#     log_file.write(f"{full_path}\n")
-		# return None, None  # 跳过该文件并返回空值
 
 			if use_default_params:
 				current_vis_params = vis_params.copy()
