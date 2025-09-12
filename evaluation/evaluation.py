@@ -85,7 +85,7 @@ def get_activations_wsi(wsi_dataloader, model, image_type, device='cuda'):
     pbar.close()
     return pred_arr
 
-# WSI 版本的统计量计算
+# WSI 版本的统计量计算 用 get_activations 得到 (N,2048) 特征矩阵
 def compute_activation_statistics_wsi(wsi_dataloader, model, image_type, device):
     act = get_activations_wsi(wsi_dataloader, model, image_type, device)
     mu = np.mean(act, axis=0)
