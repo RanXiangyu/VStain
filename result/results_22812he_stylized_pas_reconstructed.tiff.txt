@@ -1,0 +1,4 @@
+--- Computing FID ---
+FID: 56.1654
+LPIPS: 0.1676
+Content distance (alexnet): 7.0105

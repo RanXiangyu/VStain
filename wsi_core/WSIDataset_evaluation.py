@@ -242,3 +242,80 @@ class MultiWSIDataset_evaluation(Dataset):
             if handle:
                 handle.close()
         print("\nAll opened file handles have been closed.")
+
+
+import os
+import glob
+import re
+from torch.utils.data import Dataset
+from PIL import Image
+
+def parse_content_name(filename):
+    # e.g. 22811he_level0_x10049_y10371.png
+    m = re.match(r"(.*)_level\d+_x(\d+)_y(\d+)\.png", filename)
+    if m:
+        return m.group(1), int(m.group(2)), int(m.group(3))
+    return None
+
+def parse_stylized_name(filename, stain_type):
+    # e.g. 22811he_stylized_masson_x10049_y10371.png
+    pattern = rf"(.*)_stylized_{stain_type}_x(\d+)_y(\d+)\.png"
+    m = re.match(pattern, filename)
+    if m:
+        return m.group(1), int(m.group(2)), int(m.group(3))
+    return None
+
+class VirtualStainDataset(Dataset):
+    def __init__(self, content_dir, stylized_root, stain_type="masson", transform=None):
+        self.content_dir = content_dir
+        self.stylized_root = stylized_root
+        self.transform = transform
+
+        # 兼容单个字符串和列表
+        if isinstance(stain_type, str):
+            self.stain_types = [stain_type]
+        else:
+            self.stain_types = stain_type
+
+        # 1. 建立 content 索引
+        content_files = glob.glob(os.path.join(content_dir, "*.png"))
+        self.index_map = {}
+        for f in content_files:
+            parsed = parse_content_name(os.path.basename(f))
+            if parsed:
+                wsi, x, y = parsed
+                self.index_map[(wsi, x, y)] = f
+
+        # 2. 遍历所有 stain_type 的 stylized 文件
+        self.pairs = []
+        for stain in self.stain_types:
+            stylized_files = glob.glob(os.path.join(stylized_root, "*", stain, "*.png"))
+            for f in stylized_files:
+                parsed = parse_stylized_name(os.path.basename(f), stain)
+                if parsed:
+                    wsi, x, y = parsed
+                    if (wsi, x, y) in self.index_map:
+                        self.pairs.append((self.index_map[(wsi, x, y)], f, stain))
+
+        print(f"Built dataset with {len(self.pairs)} pairs for stains: {self.stain_types}")
+
+    def __len__(self):
+        return len(self.pairs)
+
+    def __getitem__(self, idx):
+        path_content, path_stylized, stain = self.pairs[idx]
+
+        content = Image.open(path_content).convert("RGB")
+        stylized = Image.open(path_stylized).convert("RGB")
+
+        if self.transform:
+            content = self.transform(content)
+            stylized = self.transform(stylized)
+
+        return {
+            "content": content,
+            "stylized": stylized,
+            "path_content": path_content,
+            "path_stylized": path_stylized,
+            "stain_type": stain
+        }

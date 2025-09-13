@@ -14,6 +14,7 @@ import sys
 import utils
 import inception
 import image_metrics
+import pathlib
 
 # 将当前文件的上级目录（也就是项目根目录）添加到 sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -117,9 +118,19 @@ def compute_fid_wsi(wsi_dataloader, device, ckpt_path):
 # WSI 版本的内容距离计算
 def compute_content_distance_wsi(wsi_dataloader, content_metric, device):
     device_obj = torch.device(device)
-    if content_metric == 'lpips':
-        metric = image_metrics.LPIPS().to(device_obj)
-    else: # 添加对其他度量的支持
+    # if content_metric == 'lpips':
+    #     metric = image_metrics.LPIPS().to(device_obj)
+    # else: # 添加对其他度量的支持
+    #     raise ValueError(f'Invalid content metric: {content_metric}')
+
+    metric_list = ['alexnet', 'ssim', 'ms-ssim']
+    if content_metric in metric_list:
+        metric = image_metrics.Metric(content_metric).to(device)
+    elif content_metric == 'lpips':
+        metric = image_metrics.LPIPS().to(device)
+    elif content_metric == 'vgg':
+        metric = image_metrics.LPIPS_vgg().to(device)
+    else:
         raise ValueError(f'Invalid content metric: {content_metric}')
 
     dist_sum = 0.0
@@ -133,6 +144,39 @@ def compute_content_distance_wsi(wsi_dataloader, content_metric, device):
         pbar.update(batch_stylized.shape[0])
     pbar.close()
     return dist_sum / len(wsi_dataloader.dataset)
+
+def compute_patch_simi(wsi_dataloader, device):
+
+    # 初始化用于计算距离的度量类
+    metric = image_metrics.PatchSimi(device=device).to(device)
+
+    dist_sum = 0.0
+    N = 0
+    pbar = tqdm(total=len(wsi_dataloader.dataset), desc=f"Computing {metric}")
+
+    for batch_content, batch_stylized, _ in wsi_dataloader:
+        with torch.no_grad():
+            batch_dist = metric(batch_stylized.to(device), batch_content.to(device)) 
+            #得到一个逐图像的距离张量，累加和平均
+            N += batch_stylized.shape[0]
+            dist_sum += torch.sum(batch_dist)
+
+        pbar.update(batch_stylized.shape[0])
+
+    pbar.close()
+
+    return dist_sum / N
+
+"""以下计算CSFD"""
+
+def compute_cfsd(wsi_dataloader, device):
+
+    print('Compute CFSD value...')
+
+    # 计算 Patch Similarity，该函数返回样式化图像和内容图像的距离值
+    simi_val = compute_patch_simi(wsi_dataloader, device)
+    simi_dist = f'{simi_val.item():.4f}'# 将距离值保留四位小数
+    return simi_dist
 
 
 def get_opt():
@@ -158,6 +202,8 @@ def get_opt():
     opt = parser.parse_args()
 
     return opt
+
+
 def main(opt):
     print("--- Initializing WSI Dataset ---")
     dataset = WSIDataset_evaluation(
@@ -176,18 +222,44 @@ def main(opt):
         pin_memory=True
     )
     
- 
+    stained_file = pathlib.Path(opt.stained_path).name
+    out_file = f"results_{stained_file}.txt"
+
 
     try:
-        print("\n--- Computing FID ---")
-        artfid_value = compute_fid_wsi(wsi_dataloader = dataloader, device = opt.device, ckpt_path = opt.ckpt_path)
+        with open(out_file, 'w') as f:
+            def write(msg):
+                print(msg)
+                f.write(msg + "\n")
 
-        print(f"\n--- Computing Content Distance ({opt.content_metric}) ---")
-        content_dist_value = compute_content_distance_wsi(dataloader, opt.content_metric, opt.device)
 
-        print("\n\n--- Evaluation Results ---")
-        print(f'ArtFID: {artfid_value:.4f}')
-        print(f'{opt.content_metric.upper()}: {content_dist_value:.4f}')
+            print("\n--- Computing FID ---")
+            write("--- Computing FID ---")
+            artfid_value = compute_fid_wsi(wsi_dataloader = dataloader, device = opt.device, ckpt_path = opt.ckpt_path)
+            print(f'FID: {artfid_value:.4f}')
+            write(f'FID: {artfid_value:.4f}')
+
+            print(f"\n--- Computing Content Distance ({opt.content_metric}) ---")
+            content_dist_value = compute_content_distance_wsi(dataloader, opt.content_metric, opt.device)
+            print(f'{opt.content_metric.upper()}: {content_dist_value:.4f}')
+            write(f'{opt.content_metric.upper()}: {content_dist_value:.4f}')
+
+            # 其他 metric
+            metrics = ['alexnet', 'ssim', 'vgg', 'ms-ssim']
+            for m in metrics:
+                dist = compute_content_distance_wsi(dataloader, content_metric=m, device=opt.device)
+                write(f"Content distance ({m}): {dist:.4f}")
+
+            write("--- Computing CSFD ---") 
+            print("\n--- Computing csfd ---")
+            cfsd_value = compute_cfsd(dataloader, opt.device)
+            print(f'{opt.content_metric.upper()}: {cfsd_value:.4f}')
+            
+            write(f'{opt.content_metric.upper()}: {cfsd_value:.4f}')
+
+        write(f"\nAll results saved to {out_file}")
+
+
 
     finally:
         dataset.close()
